@@ -3,8 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
-
-#include <stdio.h>
+#include <string>
 
 namespace dashDiff
 {   
@@ -153,7 +152,7 @@ namespace dashDiff
 						char* nleft, * nright;
 						int range = 1;
 
-						// Only do this every 15 passes.
+						// Only do this every 50 passes.
 						if (x % 50 == 0)
 							std::cout << "\r[" << i << "]" << "{" << j << "/" << oldFileBufferArray[i].pointerBuffer.size() << " -> " << rangeVector.size() << "} ";
 
@@ -432,6 +431,51 @@ namespace dashDiff
 			return true;
 		}
 
+		void writeToPatchFile(std::fstream *afileStream)
+		{
+			char *oldFilePointer = oldFileBuffer;
+			char *newFilePointer = newFileBuffer;
+
+			for (int i = 0; i < rangeVector.size(); i++)
+			{
+				// Delete everything in the old file before the range.
+				if (oldFilePointer != rangeVector[i].oldRange.start)
+				{
+					*afileStream << "-[" << rangeVector[i].oldRange.start - oldFilePointer << "]";
+					oldFilePointer = rangeVector[i].oldRange.start;
+				}
+				// Add everything in the new file before the range.
+				if (newFilePointer != rangeVector[i].newRange.start)
+				{
+					*afileStream << "+[" << rangeVector[i].newRange.start - newFilePointer << "]";
+					while (newFilePointer < rangeVector[i].newRange.start)
+					{
+						*afileStream << *newFilePointer;
+						newFilePointer++;
+					};
+				}
+				// Skip the range
+				*afileStream << "S[" << rangeVector[i].oldRange.end - rangeVector[i].oldRange.start << "]";
+				oldFilePointer = rangeVector[i].oldRange.end;
+				newFilePointer = rangeVector[i].newRange.end;
+			}
+			// Print the rest of the old file.
+			if (oldFilePointer != &oldFileBuffer[oldFileBufferSize])
+			{
+				*afileStream << "-[" << &oldFileBuffer[oldFileBufferSize] - oldFilePointer << "]";
+			}
+			// Print the rest of the new file.
+			if (newFilePointer != &newFileBuffer[newFileBufferSize])
+			{
+				*afileStream << "+[" << &newFileBuffer[newFileBufferSize] - newFilePointer << "]";
+				while (newFilePointer != &newFileBuffer[newFileBufferSize])
+				{
+					*afileStream << *newFilePointer;
+					newFilePointer++;
+				}
+			}
+		}
+
 		void displayDifferences(void)
 		{
 			char *oldFilePointer = oldFileBuffer;
@@ -522,26 +566,69 @@ namespace dashDiff
 				newFile.close();
 			}
 
-			delete oldFileBuffer;
-			delete newFileBuffer;
+			free( oldFileBuffer);
+			free( newFileBuffer);
 		}
 	};	
 
 }
-int main()
+int main(int argc, char** argv)
 {
+	std::vector<std::string> FileList;
+	std::string patchFile = "patch.dph";
+	std::fstream patchFileStream;
+
 	dashDiff::dashDiff dashDiff;
 
-	if (!dashDiff.openForComparison("prboomp_enemy.c","chocolatedoomp_enemy.c"))
+	std::cout << "dashDiff v0.5 (c) 2023 Christopher Laverdure" << std::endl;
+	std::cout << "All rights reserved. If it went kapoop, I didn't do it. That code was written by a guy named Bob." << std::endl;
+	std::cout << "We must all try to hurt Bob whenever he exposes himself from between the cushions of the code." << std::endl;
+	std::cout << "=-----------------------------------------------------------------------------------------------=" << std::endl;
+	
+	// Let's look for our arguments.
+	for (int i = 1; i < argc; i++)
+	{
+		FileList.push_back(argv[i]);
+	}
+
+	// We're only going to do two files at a time for now.
+	if (FileList.size() != 2)
+	{
+		std::cout << "dashDiff::main(): Invalid number of files specified." << std::endl;
+		return -1;
+	}
+
+	//FileList.push_back("test1.txt");
+	//FileList.push_back("test2.txt");
+
+	if (!dashDiff.openForComparison(FileList[0].c_str(), FileList[1].c_str()))
 	{
 		std::cout << "Failed to open files for comparison." << std::endl;
 		return -1;
 	}
 
+	// Open patch file for writing, overwrite any data there if it exists.
+	patchFileStream.open(patchFile, std::ios::out | std::ios::binary | std::ios::trunc);
+	if (!patchFileStream.is_open())
+	{
+		std::cout << "dashDiff::main(): Failed to open patch file for writing." << std::endl;
+		return -1;
+	}
+
+	std::cout << "Processing differences between " << FileList[0] << " and " << FileList[1] << std::endl;
+
+	// The first line in the file is going to be the old file name.
+	patchFileStream << FileList[0] << std::endl;
+	// followed by the new file name.
+	patchFileStream << FileList[1] << std::endl;
+
 	dashDiff.readIntoBuffers();
 	dashDiff.dumpBuffersintoArray();
 	dashDiff.removeWeakOverlaps();
-	dashDiff.displayDifferences();
+    dashDiff.writeToPatchFile(&patchFileStream);
+
+	// Close the patch file.
+	patchFileStream.close();
 	
 	return 0;
 }
