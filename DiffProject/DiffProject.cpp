@@ -126,13 +126,13 @@ namespace dashDiff
 
 			// Dump the buffers into the arrays for sorting.
 			for (int i = 0; i < oldFileBufferSize; i++)
-			{
-				oldFileBufferArray[oldFileBuffer[i]].add(&oldFileBuffer[i], &oldFileBuffer[i], &oldFileBuffer[i], &oldFileBuffer[0], &oldFileBuffer[oldFileBufferSize - 1]);
+			{	// 128 + because char's are unsigned by default. I only missed this because I was using plaintext before.
+				oldFileBufferArray[128+oldFileBuffer[i]].add(&oldFileBuffer[i], &oldFileBuffer[i], &oldFileBuffer[i], &oldFileBuffer[0], &oldFileBuffer[oldFileBufferSize - 1]);
 			}
 
 			for (int i = 0; i < newFileBufferSize; i++)
 			{
-				newFileBufferArray[newFileBuffer[i]].add(&newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[0], &newFileBuffer[newFileBufferSize - 1]);
+				newFileBufferArray[128+newFileBuffer[i]].add(&newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[0], &newFileBuffer[newFileBufferSize - 1]);
 			}
 
 			for (int i = 0; i < 256; i++)
@@ -153,7 +153,7 @@ namespace dashDiff
 						int range = 1;
 
 						// Only do this every 50 passes.
-						if (x % 50 == 0)
+						if (x % 100 == 0)
 							std::cout << "\r[" << i << "]" << "{" << j << "/" << oldFileBufferArray[i].pointerBuffer.size() << " -> " << rangeVector.size() << "} ";
 
 						oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
@@ -247,8 +247,9 @@ namespace dashDiff
 							}
 						}
 
-						if (range > 1) // It only really counts if it's bigger than 1.
-						{
+						if (range > 4) // Set to a 5 minimum because the code for S[text] is 4 bytes long as a minimum.
+						{				// So while we can skip that text, it really doesm't save us anything and just increases
+										// the size of the patch file, and computation time.
 							dualRange response;
 
 
@@ -283,8 +284,8 @@ namespace dashDiff
 							rangeVector.push_back(response);
 							wheelbarrowPlus++;
 
-							if (x % 50 == 0)
-								std::cout << "In: [" << wheelbarrow[wheelbarrowPlus % 4] << "] Out: [" << wheelbarrow[wheelbarrowNeg % 4] << "]                     \r";
+							if (x % 100 == 0)
+								std::cout << "In: [" << wheelbarrow[wheelbarrowPlus % 4] << "] Out: [" << wheelbarrow[wheelbarrowNeg % 4] << "]     \r";
 						}
 						
 					}
@@ -595,11 +596,11 @@ int main(int argc, char** argv)
 	if (FileList.size() != 2)
 	{
 		std::cout << "dashDiff::main(): Invalid number of files specified." << std::endl;
-		return -1;
+		//return -1;
 	}
 
-	//FileList.push_back("test1.txt");
-	//FileList.push_back("test2.txt");
+	FileList.push_back("pg43945.txt");
+	FileList.push_back("pg71907.txt");
 
 	if (!dashDiff.openForComparison(FileList[0].c_str(), FileList[1].c_str()))
 	{
