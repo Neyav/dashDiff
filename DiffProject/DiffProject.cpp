@@ -123,6 +123,23 @@ namespace dashDiff
 
 		void dumpBuffersintoArray(void)
 		{
+			uint8_t* oldBufferFlag = nullptr;
+			uint8_t* newBufferFlag = nullptr;
+
+			// Optimization: If a range has already been added, and our character falls INSIDE that range, then there is no way we can expand upon it.
+			//			     So it won't be bigger, only the same size, and therefore there is no reason to even look. Must be true on both the old and new side.
+
+			oldBufferFlag = new uint8_t[oldFileBufferSize];
+			newBufferFlag = new uint8_t[newFileBufferSize];
+
+			for (int i = 0; i < oldFileBufferSize; i++)
+			{
+				oldBufferFlag[i] = 0;
+			}
+			for (int i = 0; i < newFileBufferSize; i++)
+			{
+				newBufferFlag[i] = 0;
+			}
 
 			// Dump the buffers into the arrays for sorting.
 			for (int i = 0; i < oldFileBufferSize; i++)
@@ -138,7 +155,7 @@ namespace dashDiff
 			for (int i = 0; i < 256; i++)
 			{
 				if (oldFileBufferArray[i].pointerBuffer.size() == 0 || newFileBufferArray[i].pointerBuffer.size() == 0)
-					continue; // Skip this character if it doesn't exist in both files, it can't be matched.
+					continue; // Skip this character if it doesn't exist in both files, it can't be valid.
 
 				for (int j = 0; j < oldFileBufferArray[i].pointerBuffer.size(); j++)
 				{
@@ -152,9 +169,13 @@ namespace dashDiff
 						char* nleft, * nright;
 						int range = 1;
 
+						if (oldBufferFlag[oldFileBufferArray[i].pointerBuffer[j].reference - &oldFileBuffer[0]] > 0 &&
+														newBufferFlag[newFileBufferArray[i].pointerBuffer[x].reference - &newFileBuffer[0]] > 0)
+							continue;
+
 						// Only do this every 50 passes.
-						if (x % 100 == 0)
-							std::cout << "\r[" << i << "]" << "{" << j << "/" << oldFileBufferArray[i].pointerBuffer.size() << " -> " << rangeVector.size() << "} ";
+						if (x % 1000 == 0)
+							std::cout << "\r[" << i << "]" << "{" << j << "/" << oldFileBufferArray[i].pointerBuffer.size() << " -> " << rangeVector.size() << "}     ";
 
 						oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
 						nleft = nright = newFileBufferArray[i].pointerBuffer[x].reference;
@@ -207,7 +228,16 @@ namespace dashDiff
 									if (tempRange.oldRange > it->oldRange)
 									{
 										wheelbarrowNeg++;
+
+
+										for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
+										{
+											oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
+											newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
+										}
+
 										it = rangeVector.erase(it);
+
 										if (it != rangeVector.begin())
 											it--;
 
@@ -228,6 +258,13 @@ namespace dashDiff
 									if (tempRange.newRange > it->newRange)
 									{
 										wheelbarrowNeg++;
+
+										for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
+										{
+											oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
+											newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
+										}
+
 										it = rangeVector.erase(it);
 
 										if (it != rangeVector.begin())
@@ -284,72 +321,25 @@ namespace dashDiff
 							rangeVector.push_back(response);
 							wheelbarrowPlus++;
 
-							if (x % 100 == 0)
-								std::cout << "In: [" << wheelbarrow[wheelbarrowPlus % 4] << "] Out: [" << wheelbarrow[wheelbarrowNeg % 4] << "]     \r";
+							// Remove out of order ranges here, so they don't clog the pipeline later on.
+							this->removeWeakOverlaps(&wheelbarrowNeg, oldBufferFlag, newBufferFlag);
+
+							if (x % 1000 == 0)
+								std::cout << "    --> In Processing: [" << wheelbarrow[wheelbarrowPlus % 4] << "] Efficency Disposal: [" << wheelbarrow[wheelbarrowNeg % 4] << "]     \r";
 						}
 						
 					}
 				}
 			}
+
+			if (oldBufferFlag != nullptr)
+				free(oldBufferFlag);
+			if (newBufferFlag != nullptr)
+				free(newBufferFlag);
 		}
 
-		void removeWeakOverlaps(void)
+		void removeWeakOverlaps(int *argWheelNeg, uint8_t *argOldBuff, uint8_t *argNewBuff)
 		{
-			std::cout << std::endl << "=-----------------------------------------------------------------------------------------=" << std::endl;
-			std::cout << "Ranges Found: " << rangeVector.size() << std::endl;
-
-			// Check the ranges for any overlaps, if any of them overlap the bigger one wins.
-
-			/*for (int i = 0; i < rangeVector.size(); i++)
-			{
-				for (int j = 0; j < rangeVector.size(); j++)
-				{
-					if (i == j)
-						continue;
-
-					if (valuesOverlap(rangeVector[i].oldRange, rangeVector[j].oldRange))
-					{
-
-						if (rangeVector[i].oldRange > rangeVector[j].oldRange)
-						{
-							rangeVector.erase(rangeVector.begin() + j);
-							j--;
-						}
-						else
-						{
-							rangeVector.erase(rangeVector.begin() + i);
-							i--;
-							break;
-						}
-					}
-				}
-			}
-
-			// Check for overlaps on the new side.
-			for (int i = 0; i < rangeVector.size(); i++)
-			{
-				for (int j = 0; j < rangeVector.size(); j++)
-				{
-					if (i == j)
-						continue;
-
-					if (valuesOverlap(rangeVector[i].newRange, rangeVector[j].newRange))
-					{
-						if (rangeVector[i].newRange > rangeVector[j].newRange)
-						{
-							rangeVector.erase(rangeVector.begin() + j);
-							j--;
-						}
-						else
-						{
-							rangeVector.erase(rangeVector.begin() + i);
-							i--;
-							break;
-						}
-					}
-				}
-			}*/
-
 			// All the ranges need to be in the same order per side, as all we can do now to differentiate the files is delete from the old
 			// or insert into the new. The number of bytes is immaterial, but out of order ranges are fools dreams. The decision is easy, however.
 			// The bigger range wins.
@@ -369,11 +359,25 @@ namespace dashDiff
 						// Delete the smaller of the two as they are out of order.
 						if (rangeVector[i].rangeSize >= rangeVector[j].rangeSize)
 						{
+							(*argWheelNeg)++;
+							for (int flagit = 0; flagit < rangeVector[j].oldRange.sizeofRange(); flagit++)
+							{
+								argOldBuff[rangeVector[j].oldRange.start - &oldFileBuffer[0] + flagit]--;
+								argNewBuff[rangeVector[j].newRange.start - &newFileBuffer[0] + flagit]--;
+							}
+
 							rangeVector.erase(rangeVector.begin() + j);
 							j--;
 						}
 						else
 						{
+							(*argWheelNeg)++;
+							for (int flagit = 0; flagit < rangeVector[i].oldRange.sizeofRange(); flagit++)
+							{
+								argOldBuff[rangeVector[i].oldRange.start - &oldFileBuffer[0] + flagit]--;
+								argNewBuff[rangeVector[i].newRange.start - &newFileBuffer[0] + flagit]--;
+							}
+
 							rangeVector.erase(rangeVector.begin() + i);
 							i--;
 							break;
@@ -381,10 +385,12 @@ namespace dashDiff
 						
 					}
 				}
-			}
+			}	
+		}
 
-			std::cout << "Ranges After socking out of order ranges: " << rangeVector.size() << std::endl;
-
+		void sortRanges(void)
+		{
+			// Sort the ranges by the start of the old range.
 			std::sort(rangeVector.begin(), rangeVector.end());
 		}
 
@@ -599,8 +605,8 @@ int main(int argc, char** argv)
 		//return -1;
 	}
 
-	FileList.push_back("pg43945.txt");
-	FileList.push_back("pg71907.txt");
+	FileList.push_back("prboomp_enemy.c");
+	FileList.push_back("chocolatedoomp_enemy.c");
 
 	if (!dashDiff.openForComparison(FileList[0].c_str(), FileList[1].c_str()))
 	{
@@ -625,7 +631,8 @@ int main(int argc, char** argv)
 
 	dashDiff.readIntoBuffers();
 	dashDiff.dumpBuffersintoArray();
-	dashDiff.removeWeakOverlaps();
+	//dashDiff.removeWeakOverlaps();
+	dashDiff.sortRanges();
     dashDiff.writeToPatchFile(&patchFileStream);
 
 	// Close the patch file.
