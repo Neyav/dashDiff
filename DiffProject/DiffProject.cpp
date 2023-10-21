@@ -8,6 +8,15 @@
 namespace dashDiff
 {   
 	// Stores all the information about our character matching for finding similar blocks of text.
+	struct differencesReport
+	{
+		uint32_t oldFileSize;
+		uint32_t newFileSize;
+		uint32_t deletedCharacters;
+		uint32_t insertedCharacters;
+		uint32_t sameCharacters;
+	};
+
 	class characterRange
 	{
 	public:
@@ -109,6 +118,8 @@ namespace dashDiff
 
 		std::vector<dualRange> rangeVector;
 
+		differencesReport report;
+
 		bool valuesOverlap(characterRange& a, characterRange& b)
 		{
 			// if the space required to fit both ranges is less than the sum of the two ranges, they overlap.
@@ -120,6 +131,11 @@ namespace dashDiff
 		}
 
 	public:
+
+		differencesReport getReport(void)
+		{
+			return report;
+		}
 
 		void dumpBuffersintoArray(void)
 		{
@@ -425,6 +441,8 @@ namespace dashDiff
 
 		bool openForComparison(const char* oldFilePath, const char* newFilePath)
 		{
+			report = { 0, 0, 0, 0, 0 };
+
 			// open both files as binary input streams.
 			oldFile.open(oldFilePath, std::ios::in | std::ios::binary);
 			newFile.open(newFilePath, std::ios::in | std::ios::binary);
@@ -443,12 +461,16 @@ namespace dashDiff
 			char *oldFilePointer = oldFileBuffer;
 			char *newFilePointer = newFileBuffer;
 
+			report.oldFileSize = oldFileBufferSize;
+			report.newFileSize = newFileBufferSize;
+
 			for (int i = 0; i < rangeVector.size(); i++)
 			{
 				// Delete everything in the old file before the range.
 				if (oldFilePointer != rangeVector[i].oldRange.start)
 				{
 					*afileStream << "-[" << rangeVector[i].oldRange.start - oldFilePointer << "]";
+					report.deletedCharacters += rangeVector[i].oldRange.start - oldFilePointer;
 					oldFilePointer = rangeVector[i].oldRange.start;
 				}
 				// Add everything in the new file before the range.
@@ -459,17 +481,20 @@ namespace dashDiff
 					{
 						*afileStream << *newFilePointer;
 						newFilePointer++;
+						report.insertedCharacters++;
 					};
 				}
 				// Skip the range
 				*afileStream << "S[" << rangeVector[i].oldRange.end - rangeVector[i].oldRange.start << "]";
 				oldFilePointer = rangeVector[i].oldRange.end;
 				newFilePointer = rangeVector[i].newRange.end;
+				report.sameCharacters += rangeVector[i].oldRange.end - rangeVector[i].oldRange.start;
 			}
 			// Print the rest of the old file.
 			if (oldFilePointer != &oldFileBuffer[oldFileBufferSize])
 			{
 				*afileStream << "-[" << &oldFileBuffer[oldFileBufferSize] - oldFilePointer << "]";
+				report.deletedCharacters += &oldFileBuffer[oldFileBufferSize] - oldFilePointer;
 			}
 			// Print the rest of the new file.
 			if (newFilePointer != &newFileBuffer[newFileBufferSize])
@@ -479,6 +504,7 @@ namespace dashDiff
 				{
 					*afileStream << *newFilePointer;
 					newFilePointer++;
+					report.insertedCharacters++;
 				}
 			}
 		}
@@ -605,9 +631,6 @@ int main(int argc, char** argv)
 		//return -1;
 	}
 
-	FileList.push_back("prboomp_enemy.c");
-	FileList.push_back("chocolatedoomp_enemy.c");
-
 	if (!dashDiff.openForComparison(FileList[0].c_str(), FileList[1].c_str()))
 	{
 		std::cout << "Failed to open files for comparison." << std::endl;
@@ -631,12 +654,23 @@ int main(int argc, char** argv)
 
 	dashDiff.readIntoBuffers();
 	dashDiff.dumpBuffersintoArray();
-	//dashDiff.removeWeakOverlaps();
 	dashDiff.sortRanges();
     dashDiff.writeToPatchFile(&patchFileStream);
 
 	// Close the patch file.
 	patchFileStream.close();
-	
+
+	dashDiff::differencesReport report = dashDiff.getReport();
+
+	std::cout << std::endl << "Differences Report:" << std::endl;
+	std::cout << "Old File Size: " << report.oldFileSize << std::endl;
+	std::cout << "New File Size: " << report.newFileSize << std::endl;
+	std::cout << "Characters Deleted: " << report.deletedCharacters << std::endl;
+	std::cout << "Characters Deleted (Percentage of old Document):" << (float)report.deletedCharacters / (float)report.oldFileSize * 100.0f << "%" << std::endl;
+	std::cout << "Characters Inserted: " << report.insertedCharacters << std::endl;
+	std::cout << "Characters Inserted (Percentage of new Document):" << (float)report.insertedCharacters / (float)report.newFileSize * 100.0f << "%" << std::endl;
+	std::cout << "Characters Same: " << report.sameCharacters << std::endl;
+	std::cout << "Characters Same (Percentage of old Document):" << (float)report.sameCharacters / (float)report.oldFileSize * 100.0f << "%" << std::endl;
+
 	return 0;
 }
