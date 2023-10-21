@@ -10,11 +10,11 @@ namespace dashDiff
 	// Stores all the information about our character matching for finding similar blocks of text.
 	struct differencesReport
 	{
-		uint32_t oldFileSize;
-		uint32_t newFileSize;
-		uint32_t deletedCharacters;
-		uint32_t insertedCharacters;
-		uint32_t sameCharacters;
+		size_t oldFileSize;
+		size_t newFileSize;
+		size_t deletedCharacters;
+		size_t insertedCharacters;
+		size_t sameCharacters;
 	};
 
 	class characterRange
@@ -27,7 +27,7 @@ namespace dashDiff
 		char *min;
 		char *max;
 
-		uint32_t sizeofRange(void)
+		size_t sizeofRange(void)
 		{
 			return end - start;
 		}
@@ -51,7 +51,7 @@ namespace dashDiff
 	{
 		characterRange oldRange;
 		characterRange newRange;
-		uint32_t rangeSize;
+		size_t rangeSize;
 
 		bool operator>(const dualRange& other) const
 		{
@@ -110,8 +110,8 @@ namespace dashDiff
 
 		char *oldFileBuffer;
 		char *newFileBuffer;
-		uint32_t oldFileBufferSize;
-		uint32_t newFileBufferSize;
+		size_t oldFileBufferSize;
+		size_t newFileBufferSize;
 
 		fileByteBuffer oldFileBufferArray[256];
 		fileByteBuffer newFileBufferArray[256];
