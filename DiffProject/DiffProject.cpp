@@ -3,6 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
+#include <mutex>
 #include <string>
 
 namespace dashDiff
@@ -108,7 +109,7 @@ namespace dashDiff
 		std::fstream oldFile;
 		std::fstream newFile;
 
-		char *oldFileBuffer;
+		char * oldFileBuffer;
 		char *newFileBuffer;
 		size_t oldFileBufferSize;
 		size_t newFileBufferSize;
@@ -117,6 +118,8 @@ namespace dashDiff
 		fileByteBuffer newFileBufferArray[256];
 
 		std::vector<dualRange> rangeVector;
+		std::mutex rangeVectorMutex;
+		std::mutex bufferFlagMutex;
 
 		differencesReport report;
 
@@ -135,6 +138,185 @@ namespace dashDiff
 		differencesReport getReport(void)
 		{
 			return report;
+		}
+
+		void findCommonRanges(int i, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
+		{
+			std::cout << "Finding ranges for " << i << std::endl;
+
+			for (int j = 0; j < oldFileBufferArray[i].pointerBuffer.size(); j++)
+			{
+				for (int x = 0; x < newFileBufferArray[i].pointerBuffer.size(); x++)
+				{
+					char* oleft, * oright;
+					char* nleft, * nright;
+					int range = 1;
+
+					bufferFlagMutex.lock();
+					if (oldBufferFlag[oldFileBufferArray[i].pointerBuffer[j].reference - &oldFileBuffer[0]] > 0 &&
+						newBufferFlag[newFileBufferArray[i].pointerBuffer[x].reference - &newFileBuffer[0]] > 0)
+					{
+						bufferFlagMutex.unlock();
+						continue;
+					}
+					bufferFlagMutex.unlock();
+
+					oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
+					nleft = nright = newFileBufferArray[i].pointerBuffer[x].reference;
+					// Expand to the left as much as we can while each character matches
+					while (true)
+					{
+						if (oleft == oldFileBufferArray[i].pointerBuffer[j].min || nleft == newFileBufferArray[i].pointerBuffer[x].min)
+							break;
+
+						if (*(--oleft) != *(--nleft))
+							break;
+
+						range++;
+					}
+
+					// Now expand to the right as much as we can.
+					while (true)
+					{
+						if (oright == oldFileBufferArray[i].pointerBuffer[j].max || nright == newFileBufferArray[i].pointerBuffer[x].max)
+							break;
+
+						if (*(++oright) != *(++nright))
+							break;
+
+						range++;
+					}
+
+					// Check the range to see if this overlaps with anything already in there.
+					dualRange tempRange;
+
+					tempRange.oldRange.start = oleft++;
+					tempRange.oldRange.end = oright;
+					tempRange.oldRange.min = oldFileBufferArray[i].pointerBuffer[j].min;
+					tempRange.oldRange.max = oldFileBufferArray[i].pointerBuffer[j].max;
+					tempRange.oldRange.reference = oldFileBufferArray[i].pointerBuffer[j].reference;
+					tempRange.newRange.start = nleft++;
+					tempRange.newRange.end = nright;
+					tempRange.newRange.min = newFileBufferArray[i].pointerBuffer[x].min;
+					tempRange.newRange.max = newFileBufferArray[i].pointerBuffer[x].max;
+					tempRange.newRange.reference = newFileBufferArray[i].pointerBuffer[x].reference;
+
+					rangeVectorMutex.lock();
+
+					if (rangeVector.size() > 1)
+					{
+						for (auto it = rangeVector.begin(); it != rangeVector.end(); it++)
+						{
+							if (valuesOverlap(tempRange.oldRange, it->oldRange))
+							{
+								// If this range is bigger than the one we're comparing it to, remove the smaller one.
+
+								if (tempRange.oldRange > it->oldRange)
+								{
+									bufferFlagMutex.lock();
+
+									for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
+									{
+										oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
+										newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
+									}
+
+									bufferFlagMutex.unlock();
+
+									it = rangeVector.erase(it);
+
+									if (it != rangeVector.begin())
+										it--;
+
+									if (rangeVector.empty())
+										break;
+								}
+								else
+								{
+									range = 0;
+									break;
+								}
+
+							}
+							else if (valuesOverlap(tempRange.newRange, it->newRange))
+							{
+								// If this range is bigger than the one we're comparing it to, remove the smaller one.
+
+								if (tempRange.newRange > it->newRange)
+								{
+									bufferFlagMutex.lock();
+									for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
+									{
+										oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
+										newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
+									}
+									bufferFlagMutex.unlock();
+
+									it = rangeVector.erase(it);
+
+									if (it != rangeVector.begin())
+										it--;
+
+									if (rangeVector.empty())
+										break;
+								}
+								else
+								{
+									range = 0;
+									break;
+								}
+
+							}
+
+						}
+					}
+
+					rangeVectorMutex.unlock();
+
+					if (range > 4) // Set to a 5 minimum because the code for S[text] is 4 bytes long as a minimum.
+					{				// So while we can skip that text, it really doesm't save us anything and just increases
+									// the size of the patch file, and computation time.
+						dualRange response;
+
+
+						// Alright old man, you sped, and now it's time to pay the man. Let me fill you out a ticket.
+						response.rangeSize = range;
+						response.oldRange.end = oright;
+						response.oldRange.start = oleft;
+						response.oldRange.max = oldFileBufferArray[i].pointerBuffer[j].max;
+						response.oldRange.min = oldFileBufferArray[i].pointerBuffer[j].min;
+						response.oldRange.reference = oldFileBufferArray[i].pointerBuffer[j].reference;
+						response.newRange.end = nright;
+						response.newRange.start = nleft;
+						response.newRange.max = newFileBufferArray[i].pointerBuffer[x].max;
+						response.newRange.min = newFileBufferArray[i].pointerBuffer[x].min;
+						response.newRange.reference = newFileBufferArray[i].pointerBuffer[x].reference;
+
+						// Display the contents of both ranges
+						/*std::cout << "[";
+						while (oleft != oright)
+						{
+							std::cout << *oleft;
+							oleft++;
+						}
+						std::cout << "]->[";
+						while (nleft != nright)
+						{
+							std::cout << *nleft;
+							nleft++;
+						}
+						std::cout << "]" << std::endl;*/
+
+						rangeVectorMutex.lock();
+						rangeVector.push_back(response);
+						rangeVectorMutex.unlock();
+						// Remove out of order ranges here, so they don't clog the pipeline later on.
+						this->removeWeakOverlaps(oldBufferFlag, newBufferFlag);
+
+					}
+
+				}
+			}
 		}
 
 		void dumpBuffersintoArray(void)
@@ -170,188 +352,16 @@ namespace dashDiff
 
 			for (int i = 0; i < 256; i++)
 			{
-				char wheelbarrow[] = { '-', '\\', '|', '/' };
+				/*char wheelbarrow[] = {'-', '\\', '|', '/'};
 				uint8_t wheelbarrowPlus = 0;
 				uint8_t wheelbarrowNeg = 0;
 				uint8_t oldwheelbarrowPlus = 0;
-				uint8_t oldwheelbarrowNeg = 0;
+				uint8_t oldwheelbarrowNeg = 0;*/
 
 				if (oldFileBufferArray[i].pointerBuffer.size() == 0 || newFileBufferArray[i].pointerBuffer.size() == 0)
 					continue; // Skip this character if it doesn't exist in both files, it can't be valid.
 
-				for (int j = 0; j < oldFileBufferArray[i].pointerBuffer.size(); j++)
-				{
-					for (int x = 0; x < newFileBufferArray[i].pointerBuffer.size(); x++)
-					{
-						char* oleft, * oright;
-						char* nleft, * nright;
-						int range = 1;
-
-						if (oldBufferFlag[oldFileBufferArray[i].pointerBuffer[j].reference - &oldFileBuffer[0]] > 0 &&
-														newBufferFlag[newFileBufferArray[i].pointerBuffer[x].reference - &newFileBuffer[0]] > 0)
-							continue;
-
-						// Only do this every 50 passes.
-						if (x % 1000 == 0)
-						{
-							if (oldwheelbarrowNeg != wheelbarrowNeg)
-								wheelbarrowNeg = oldwheelbarrowNeg++;
-							if (oldwheelbarrowPlus != wheelbarrowPlus)
-								wheelbarrowPlus = oldwheelbarrowPlus++;
-							std::cout << "\r[" << i << "]" << "{" << j << "/" << oldFileBufferArray[i].pointerBuffer.size() << " -> " << rangeVector.size() << "}     ";
-							std::cout << "    --> In Processing: [" << wheelbarrow[wheelbarrowPlus % 4] << "] Efficency Disposal: [" << wheelbarrow[wheelbarrowNeg % 4] << "]     \r";
-						}
-
-						oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
-						nleft = nright = newFileBufferArray[i].pointerBuffer[x].reference;
-						// Expand to the left as much as we can while each character matches
-						while (true)
-						{
-							if (oleft == oldFileBufferArray[i].pointerBuffer[j].min || nleft == newFileBufferArray[i].pointerBuffer[x].min)
-								break;
-
-							if (*(--oleft) != *(--nleft))
-								break;
-
-							range++;
-						}
-
-						// Now expand to the right as much as we can.
-						while (true)
-						{
-							if (oright == oldFileBufferArray[i].pointerBuffer[j].max || nright == newFileBufferArray[i].pointerBuffer[x].max)
-								break;
-
-							if (*(++oright) != *(++nright))
-								break;
-
-							range++;							
-						}
-
-						// Check the range to see if this overlaps with anything already in there.
-						dualRange tempRange;
-						
-						tempRange.oldRange.start = oleft++;
-						tempRange.oldRange.end = oright;
-						tempRange.oldRange.min = oldFileBufferArray[i].pointerBuffer[j].min;
-						tempRange.oldRange.max = oldFileBufferArray[i].pointerBuffer[j].max;
-						tempRange.oldRange.reference = oldFileBufferArray[i].pointerBuffer[j].reference;
-						tempRange.newRange.start = nleft++;
-						tempRange.newRange.end = nright;
-						tempRange.newRange.min = newFileBufferArray[i].pointerBuffer[x].min;
-						tempRange.newRange.max = newFileBufferArray[i].pointerBuffer[x].max;
-						tempRange.newRange.reference = newFileBufferArray[i].pointerBuffer[x].reference;
-
-						if (rangeVector.size() > 1)
-						{
-							for (auto it = rangeVector.begin(); it != rangeVector.end(); it++)
-							{
-								if (valuesOverlap(tempRange.oldRange, it->oldRange))
-								{
-									// If this range is bigger than the one we're comparing it to, remove the smaller one.
-
-									if (tempRange.oldRange > it->oldRange)
-									{
-										wheelbarrowNeg++;
-
-
-										for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
-										{
-											oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
-											newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
-										}
-
-										it = rangeVector.erase(it);
-
-										if (it != rangeVector.begin())
-											it--;
-
-										if (rangeVector.empty())
-											break;
-									}
-									else
-									{
-										range = 0;
-										break;
-									}
-
-								}
-								else if (valuesOverlap(tempRange.newRange, it->newRange))
-								{
-									// If this range is bigger than the one we're comparing it to, remove the smaller one.
-
-									if (tempRange.newRange > it->newRange)
-									{
-										wheelbarrowNeg++;
-
-										for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
-										{
-											oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
-											newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
-										}
-
-										it = rangeVector.erase(it);
-
-										if (it != rangeVector.begin())
-											it--;
-
-										if (rangeVector.empty())
-											break;
-									}
-									else
-									{
-										range = 0;
-										break;
-									}
-
-								}
-
-							}
-						}
-
-						if (range > 4) // Set to a 5 minimum because the code for S[text] is 4 bytes long as a minimum.
-						{				// So while we can skip that text, it really doesm't save us anything and just increases
-										// the size of the patch file, and computation time.
-							dualRange response;
-
-
-							// Alright old man, you sped, and now it's time to pay the man. Let me fill you out a ticket.
-							response.rangeSize = range;
-							response.oldRange.end = oright;
-							response.oldRange.start = oleft;
-							response.oldRange.max = oldFileBufferArray[i].pointerBuffer[j].max;
-							response.oldRange.min = oldFileBufferArray[i].pointerBuffer[j].min;
-							response.oldRange.reference = oldFileBufferArray[i].pointerBuffer[j].reference;
-							response.newRange.end = nright;
-							response.newRange.start = nleft;
-							response.newRange.max = newFileBufferArray[i].pointerBuffer[x].max;
-							response.newRange.min = newFileBufferArray[i].pointerBuffer[x].min;
-							response.newRange.reference = newFileBufferArray[i].pointerBuffer[x].reference;
-
-							// Display the contents of both ranges
-							/*std::cout << "[";
-							while (oleft != oright)
-							{
-								std::cout << *oleft;
-								oleft++;
-							}
-							std::cout << "]->[";
-							while (nleft != nright)
-							{
-								std::cout << *nleft;
-								nleft++;
-							}
-							std::cout << "]" << std::endl;*/
-
-							rangeVector.push_back(response);
-							wheelbarrowPlus++;
-
-							// Remove out of order ranges here, so they don't clog the pipeline later on.
-							this->removeWeakOverlaps(&wheelbarrowNeg, oldBufferFlag, newBufferFlag);
-						}
-						
-					}
-				}
+				findCommonRanges(i, oldBufferFlag, newBufferFlag);
 			}
 
 			if (oldBufferFlag != nullptr)
@@ -360,12 +370,13 @@ namespace dashDiff
 				free(newBufferFlag);
 		}
 
-		void removeWeakOverlaps(uint8_t *argWheelNeg, uint8_t *argOldBuff, uint8_t *argNewBuff)
+		void removeWeakOverlaps(uint8_t *argOldBuff, uint8_t *argNewBuff)
 		{
 			// All the ranges need to be in the same order per side, as all we can do now to differentiate the files is delete from the old
 			// or insert into the new. The number of bytes is immaterial, but out of order ranges are fools dreams. The decision is easy, however.
 			// The bigger range wins.
 
+			rangeVectorMutex.lock();
 			for (int i = 0; i < rangeVector.size(); i++)
 			{
 				for (int j = i; j < rangeVector.size(); j++)
@@ -381,11 +392,12 @@ namespace dashDiff
 						// Delete the smaller of the two as they are out of order.
 						if (rangeVector[i].rangeSize >= rangeVector[j].rangeSize)
 						{
-							(*argWheelNeg)++;
 							for (int flagit = 0; flagit < rangeVector[j].oldRange.sizeofRange(); flagit++)
 							{
+								bufferFlagMutex.lock();
 								argOldBuff[rangeVector[j].oldRange.start - &oldFileBuffer[0] + flagit]--;
 								argNewBuff[rangeVector[j].newRange.start - &newFileBuffer[0] + flagit]--;
+								bufferFlagMutex.unlock();
 							}
 
 							rangeVector.erase(rangeVector.begin() + j);
@@ -393,11 +405,12 @@ namespace dashDiff
 						}
 						else
 						{
-							(*argWheelNeg)++;
 							for (int flagit = 0; flagit < rangeVector[i].oldRange.sizeofRange(); flagit++)
 							{
+								bufferFlagMutex.lock();
 								argOldBuff[rangeVector[i].oldRange.start - &oldFileBuffer[0] + flagit]--;
 								argNewBuff[rangeVector[i].newRange.start - &newFileBuffer[0] + flagit]--;
+								bufferFlagMutex.unlock();	
 							}
 
 							rangeVector.erase(rangeVector.begin() + i);
@@ -407,7 +420,8 @@ namespace dashDiff
 						
 					}
 				}
-			}	
+			}
+			rangeVectorMutex.unlock();
 		}
 
 		void sortRanges(void)
@@ -629,6 +643,9 @@ int main(int argc, char** argv)
 	{
 		FileList.push_back(argv[i]);
 	}
+
+	FileList.push_back("prboomp_enemy.c");
+	FileList.push_back("chocolatedoomp_enemy.c");
 
 	// We're only going to do two files at a time for now.
 	if (FileList.size() != 2)
