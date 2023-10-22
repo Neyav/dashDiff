@@ -170,15 +170,17 @@ namespace dashDiff
 
 			for (int i = 0; i < 256; i++)
 			{
+				char wheelbarrow[] = { '-', '\\', '|', '/' };
+				uint8_t wheelbarrowPlus = 0;
+				uint8_t wheelbarrowNeg = 0;
+				uint8_t oldwheelbarrowPlus = 0;
+				uint8_t oldwheelbarrowNeg = 0;
+
 				if (oldFileBufferArray[i].pointerBuffer.size() == 0 || newFileBufferArray[i].pointerBuffer.size() == 0)
 					continue; // Skip this character if it doesn't exist in both files, it can't be valid.
 
 				for (int j = 0; j < oldFileBufferArray[i].pointerBuffer.size(); j++)
 				{
-					char wheelbarrow[] = { '-', '\\', '|', '/' };
-					int wheelbarrowPlus = 0;
-					int wheelbarrowNeg = 0;
-
 					for (int x = 0; x < newFileBufferArray[i].pointerBuffer.size(); x++)
 					{
 						char* oleft, * oright;
@@ -191,7 +193,14 @@ namespace dashDiff
 
 						// Only do this every 50 passes.
 						if (x % 1000 == 0)
+						{
+							if (oldwheelbarrowNeg != wheelbarrowNeg)
+								wheelbarrowNeg = oldwheelbarrowNeg++;
+							if (oldwheelbarrowPlus != wheelbarrowPlus)
+								wheelbarrowPlus = oldwheelbarrowPlus++;
 							std::cout << "\r[" << i << "]" << "{" << j << "/" << oldFileBufferArray[i].pointerBuffer.size() << " -> " << rangeVector.size() << "}     ";
+							std::cout << "    --> In Processing: [" << wheelbarrow[wheelbarrowPlus % 4] << "] Efficency Disposal: [" << wheelbarrow[wheelbarrowNeg % 4] << "]     \r";
+						}
 
 						oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
 						nleft = nright = newFileBufferArray[i].pointerBuffer[x].reference;
@@ -339,9 +348,6 @@ namespace dashDiff
 
 							// Remove out of order ranges here, so they don't clog the pipeline later on.
 							this->removeWeakOverlaps(&wheelbarrowNeg, oldBufferFlag, newBufferFlag);
-
-							if (x % 1000 == 0)
-								std::cout << "    --> In Processing: [" << wheelbarrow[wheelbarrowPlus % 4] << "] Efficency Disposal: [" << wheelbarrow[wheelbarrowNeg % 4] << "]     \r";
 						}
 						
 					}
@@ -354,7 +360,7 @@ namespace dashDiff
 				free(newBufferFlag);
 		}
 
-		void removeWeakOverlaps(int *argWheelNeg, uint8_t *argOldBuff, uint8_t *argNewBuff)
+		void removeWeakOverlaps(uint8_t *argWheelNeg, uint8_t *argOldBuff, uint8_t *argNewBuff)
 		{
 			// All the ranges need to be in the same order per side, as all we can do now to differentiate the files is delete from the old
 			// or insert into the new. The number of bytes is immaterial, but out of order ranges are fools dreams. The decision is easy, however.
@@ -362,7 +368,7 @@ namespace dashDiff
 
 			for (int i = 0; i < rangeVector.size(); i++)
 			{
-				for (int j = 0; j < rangeVector.size(); j++)
+				for (int j = i; j < rangeVector.size(); j++)
 				{
 					if (i == j)
 						continue;
