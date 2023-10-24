@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/DiffProject/fair.c
+/DiffProject/fair1.c
+/DiffProject/patch.dph
