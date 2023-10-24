@@ -121,6 +121,8 @@ namespace dashDiff
 		std::mutex rangeVectorMutex;
 		std::mutex bufferFlagMutex;
 
+		bool threadActive[10];
+
 		differencesReport report;
 
 		bool valuesOverlap(characterRange& a, characterRange& b)
@@ -140,7 +142,7 @@ namespace dashDiff
 			return report;
 		}
 
-		void findCommonRanges(int i, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
+		void findCommonRanges(int i, int athread, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
 		{
 			std::cout << "Finding ranges for " << i << std::endl;
 
@@ -152,14 +154,16 @@ namespace dashDiff
 					char* nleft, * nright;
 					int range = 1;
 
-					bufferFlagMutex.lock();
+					// I have every reason to believe that multithreading breaks this, so I'm going to not use it as a criteria for skipping until
+					// it gets refactored to work in a thread safe way.
+					/*bufferFlagMutex.lock();
 					if (oldBufferFlag[oldFileBufferArray[i].pointerBuffer[j].reference - &oldFileBuffer[0]] > 0 &&
 						newBufferFlag[newFileBufferArray[i].pointerBuffer[x].reference - &newFileBuffer[0]] > 0)
 					{
 						bufferFlagMutex.unlock();
 						continue;
 					}
-					bufferFlagMutex.unlock();
+					bufferFlagMutex.unlock();*/
 
 					oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
 					nleft = nright = newFileBufferArray[i].pointerBuffer[x].reference;
@@ -283,16 +287,13 @@ namespace dashDiff
 						response.rangeSize = range;
 						response.oldRange.end = oright;
 						response.oldRange.start = oleft;
-						response.oldRange.max = oldFileBufferArray[i].pointerBuffer[j].max;
-						response.oldRange.min = oldFileBufferArray[i].pointerBuffer[j].min;
-						response.oldRange.reference = oldFileBufferArray[i].pointerBuffer[j].reference;
 						response.newRange.end = nright;
 						response.newRange.start = nleft;
 						response.newRange.max = newFileBufferArray[i].pointerBuffer[x].max;
 						response.newRange.min = newFileBufferArray[i].pointerBuffer[x].min;
 						response.newRange.reference = newFileBufferArray[i].pointerBuffer[x].reference;
 
-						// Display the contents of both ranges
+						// Display the contents of both rangesdddddddddddddwwwwwwwwwwww
 						/*std::cout << "[";
 						while (oleft != oright)
 						{
@@ -310,6 +311,13 @@ namespace dashDiff
 						rangeVectorMutex.lock();
 						rangeVector.push_back(response);
 						rangeVectorMutex.unlock();
+						bufferFlagMutex.lock();
+						for (int bfit = 0; bfit < response.rangeSize; bfit++)
+						{
+							oldBufferFlag[response.oldRange.start - &oldFileBuffer[0] + bfit]++;
+							newBufferFlag[response.newRange.start - &newFileBuffer[0] + bfit]++;
+						}
+						bufferFlagMutex.unlock();
 						// Remove out of order ranges here, so they don't clog the pipeline later on.
 						this->removeWeakOverlaps(oldBufferFlag, newBufferFlag);
 
@@ -317,6 +325,9 @@ namespace dashDiff
 
 				}
 			}
+
+			std::cout << "Finished finding ranges for " << i << std::endl;
+			threadActive[athread] = false; // Feels wrong, but here we are.
 		}
 
 		void dumpBuffersintoArray(void)
@@ -350,6 +361,11 @@ namespace dashDiff
 				newFileBufferArray[128+newFileBuffer[i]].add(&newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[0], &newFileBuffer[newFileBufferSize - 1]);
 			}
 
+			std::thread* workthread[10];
+
+			for (int i = 0; i < 10; i++)
+				workthread[i] = nullptr;
+
 			for (int i = 0; i < 256; i++)
 			{
 				/*char wheelbarrow[] = {'-', '\\', '|', '/'};
@@ -361,13 +377,66 @@ namespace dashDiff
 				if (oldFileBufferArray[i].pointerBuffer.size() == 0 || newFileBufferArray[i].pointerBuffer.size() == 0)
 					continue; // Skip this character if it doesn't exist in both files, it can't be valid.
 
-				findCommonRanges(i, oldBufferFlag, newBufferFlag);
+				// Check to see if any threads are joinable, if so make them null.
+				while (true)
+				{
+					bool nullExists = false;
+					for (int x = 0; x < 10; x++)
+					{
+						if (workthread[x] != nullptr)
+						{
+							if (threadActive[x])
+							{
+								delete workthread[x];
+								workthread[x] = nullptr;
+
+								nullExists = true;
+							}
+						}
+						else
+							nullExists = true;
+					}
+
+					std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+					if (nullExists)
+						break;
+				}
+				// Check to see if any threads are null, if so, make them work.
+				for (int x = 0; x < 10; x++)
+					if (workthread[x] == nullptr)
+					{
+						workthread[x] = new std::thread(&dashDiff::findCommonRanges, this, i, x, oldBufferFlag, newBufferFlag);
+						threadActive[x] = true;
+						workthread[x]->detach();
+						break;
+					}
+
+				//findCommonRanges(i, oldBufferFlag, newBufferFlag);
 			}
 
-			if (oldBufferFlag != nullptr)
-				free(oldBufferFlag);
-			if (newBufferFlag != nullptr)
-				free(newBufferFlag);
+			// Wait for all threads to finish
+			while (true)
+			{
+				bool activethread = false;
+				for (int i = 0; i < 10; i++)
+				{
+					if (threadActive[i])
+					{
+						activethread = true;
+						break;
+					}
+				}
+				if (!activethread)
+					break;
+
+				std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			}
+
+			//if (oldBufferFlag != nullptr)
+				//free(oldBufferFlag);
+			//if (newBufferFlag != nullptr)
+				//free(newBufferFlag);
 		}
 
 		void removeWeakOverlaps(uint8_t *argOldBuff, uint8_t *argNewBuff)
@@ -606,6 +675,9 @@ namespace dashDiff
 			oldFileBuffer = nullptr;
 			newFileBuffer = nullptr;
 			oldFileBufferSize = newFileBufferSize = 0;
+
+			for (int i = 0; i < 10; i++)
+				threadActive[i] = false;
 		}
 		~dashDiff()
 		{
