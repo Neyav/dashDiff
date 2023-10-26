@@ -6,6 +6,8 @@
 #include <mutex>
 #include <string>
 
+#define THREADCOUNT 15
+
 namespace dashDiff
 {   
 	// Stores all the information about our character matching for finding similar blocks of text.
@@ -121,7 +123,7 @@ namespace dashDiff
 		std::mutex rangeVectorMutex;
 		std::mutex bufferFlagMutex;
 
-		bool threadActive[10];
+		bool threadActive[THREADCOUNT];
 
 		differencesReport report;
 
@@ -361,9 +363,9 @@ namespace dashDiff
 				newFileBufferArray[128+newFileBuffer[i]].add(&newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[0], &newFileBuffer[newFileBufferSize - 1]);
 			}
 
-			std::thread* workthread[10];
+			std::thread* workthread[THREADCOUNT];
 
-			for (int i = 0; i < 10; i++)
+			for (int i = 0; i < THREADCOUNT; i++)
 				workthread[i] = nullptr;
 
 			for (int i = 0; i < 256; i++)
@@ -381,11 +383,11 @@ namespace dashDiff
 				while (true)
 				{
 					bool nullExists = false;
-					for (int x = 0; x < 10; x++)
+					for (int x = 0; x < THREADCOUNT; x++)
 					{
 						if (workthread[x] != nullptr)
 						{
-							if (threadActive[x])
+							if (!threadActive[x])
 							{
 								delete workthread[x];
 								workthread[x] = nullptr;
@@ -403,7 +405,7 @@ namespace dashDiff
 						break;
 				}
 				// Check to see if any threads are null, if so, make them work.
-				for (int x = 0; x < 10; x++)
+				for (int x = 0; x < THREADCOUNT; x++)
 					if (workthread[x] == nullptr)
 					{
 						workthread[x] = new std::thread(&dashDiff::findCommonRanges, this, i, x, oldBufferFlag, newBufferFlag);
@@ -419,7 +421,7 @@ namespace dashDiff
 			while (true)
 			{
 				bool activethread = false;
-				for (int i = 0; i < 10; i++)
+				for (int i = 0; i < THREADCOUNT; i++)
 				{
 					if (threadActive[i])
 					{
@@ -430,7 +432,7 @@ namespace dashDiff
 				if (!activethread)
 					break;
 
-				std::this_thread::sleep_for(std::chrono::milliseconds(500));
+				std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 			}
 
 			//if (oldBufferFlag != nullptr)
@@ -676,7 +678,7 @@ namespace dashDiff
 			newFileBuffer = nullptr;
 			oldFileBufferSize = newFileBufferSize = 0;
 
-			for (int i = 0; i < 10; i++)
+			for (int i = 0; i < THREADCOUNT; i++)
 				threadActive[i] = false;
 		}
 		~dashDiff()
