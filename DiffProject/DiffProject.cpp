@@ -6,7 +6,7 @@
 #include <mutex>
 #include <string>
 
-#define THREADCOUNT 8
+#define THREADCOUNT 10
 
 namespace dashDiff
 {   
@@ -137,112 +137,111 @@ namespace dashDiff
 			return false;
 		}
 
-	public:
-
-		differencesReport getReport(void)
+		void removeWeakOverlaps(uint8_t* argOldBuff, uint8_t* argNewBuff)
 		{
-			return report;
+			// All the ranges need to be in the same order per side, as all we can do now to differentiate the files is delete from the old
+			// or insert into the new. The number of bytes is immaterial, but out of order ranges are fools dreams. The decision is easy, however.
+			// The bigger range wins.
+
+			for (int i = 0; i < rangeVector.size(); i++)
+			{
+				for (int j = i; j < rangeVector.size(); j++)
+				{
+					if (i == j)
+						continue;
+
+					if ((rangeVector[i].oldRange.start > rangeVector[j].oldRange.start &&
+						rangeVector[i].newRange.start < rangeVector[j].newRange.start) ||
+						(rangeVector[i].oldRange.start < rangeVector[j].oldRange.start &&
+							rangeVector[i].newRange.start > rangeVector[j].newRange.start))
+					{
+						// Delete the smaller of the two as they are out of order.
+						if (rangeVector[i].rangeSize >= rangeVector[j].rangeSize)
+						{
+							for (int flagit = 0; flagit < rangeVector[j].oldRange.sizeofRange(); flagit++)
+							{
+								bufferFlagMutex.lock();
+								argOldBuff[rangeVector[j].oldRange.start - &oldFileBuffer[0] + flagit]--;
+								argNewBuff[rangeVector[j].newRange.start - &newFileBuffer[0] + flagit]--;
+								bufferFlagMutex.unlock();
+							}
+
+							rangeVector.erase(rangeVector.begin() + j);
+							j--;
+						}
+						else
+						{
+							for (int flagit = 0; flagit < rangeVector[i].oldRange.sizeofRange(); flagit++)
+							{
+								bufferFlagMutex.lock();
+								argOldBuff[rangeVector[i].oldRange.start - &oldFileBuffer[0] + flagit]--;
+								argNewBuff[rangeVector[i].newRange.start - &newFileBuffer[0] + flagit]--;
+								bufferFlagMutex.unlock();
+							}
+
+							rangeVector.erase(rangeVector.begin() + i);
+							i--;
+							break;
+						}
+
+					}
+				}
+			}
+		}
+
+		void removeOverlapEntry(int *it, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
+		{
+			bufferFlagMutex.lock();
+
+			for (int flagit = 0; flagit < rangeVector[*it].oldRange.sizeofRange(); flagit++)
+			{
+				oldBufferFlag[rangeVector[*it].oldRange.start - &oldFileBuffer[0] + flagit]--;
+				newBufferFlag[rangeVector[*it].newRange.start - &newFileBuffer[0] + flagit]--;
+			}
+
+			bufferFlagMutex.unlock();
+
+			rangeVector.erase(rangeVector.begin() + *it);
+
+			*it--;
 		}
 
 		void reduceOverlaps(uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
 		{
 			if (rangeVector.size() > 1)
 			{
-				for (auto xt = rangeVector.begin(); xt != rangeVector.end(); xt++)
+				for (int xt = 0; xt < rangeVector.size(); xt++)
 				{
-					for (auto it = rangeVector.begin(); it != rangeVector.end(); it++)
+					for (int it = xt; it < rangeVector.size(); it++)
 					{
 						if (xt == it)
 							continue;
 
-						if (valuesOverlap(xt->oldRange, it->oldRange))
+						if (valuesOverlap(rangeVector[xt].oldRange, rangeVector[it].oldRange))
 						{
 							// If this range is bigger than the one we're comparing it to, remove the smaller one.
 
-							if (xt->oldRange > it->oldRange)
+							if (rangeVector[xt].oldRange > rangeVector[it].oldRange)
 							{
-								bufferFlagMutex.lock();
-
-								for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
-								{
-									oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
-									newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
-								}
-
-								bufferFlagMutex.unlock();
-
-								it = rangeVector.erase(it);
-
-								if (it != rangeVector.begin())
-									it--;
-
-								if (rangeVector.empty())
-									break;
+								removeOverlapEntry(&it, oldBufferFlag, newBufferFlag);
 							}
 							else
 							{
-								bufferFlagMutex.lock();
-
-								for (int flagit = 0; flagit < xt->oldRange.sizeofRange(); flagit++)
-								{
-									oldBufferFlag[xt->oldRange.start - &oldFileBuffer[0] + flagit]--;
-									newBufferFlag[xt->newRange.start - &newFileBuffer[0] + flagit]--;
-								}
-
-								bufferFlagMutex.unlock();
-
-								xt = rangeVector.erase(xt);
-
-								if (xt != rangeVector.begin())
-									xt--;
-
-								if (rangeVector.empty())
-									break;
-
+								removeOverlapEntry(&xt, oldBufferFlag, newBufferFlag);
 							}
 
 						}
-						else if (valuesOverlap(xt->newRange, it->newRange))
+						else if (valuesOverlap(rangeVector[xt].newRange, rangeVector[it].newRange))
 						{
 							// If this range is bigger than the one we're comparing it to, remove the smaller one.
 
-							if (xt->newRange > it->newRange)
+							if (rangeVector[xt].newRange > rangeVector[it].newRange)
 							{
-								bufferFlagMutex.lock();
-								for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
-								{
-									oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
-									newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
-								}
-								bufferFlagMutex.unlock();
-
-								it = rangeVector.erase(it);
-
-								if (it != rangeVector.begin())
-									it--;
-
-								if (rangeVector.empty())
-									break;
+								removeOverlapEntry(&it, oldBufferFlag, newBufferFlag);
 							}
 							else
 							{
-								bufferFlagMutex.lock();
-
-								for (int flagit = 0; flagit < xt->oldRange.sizeofRange(); flagit++)
-								{
-									oldBufferFlag[xt->oldRange.start - &oldFileBuffer[0] + flagit]--;
-									newBufferFlag[xt->newRange.start - &newFileBuffer[0] + flagit]--;
-								}
-
-								bufferFlagMutex.unlock();
-
-								xt = rangeVector.erase(xt);
-
-								if (xt != rangeVector.begin())
-									xt--;
-
-								if (rangeVector.empty())
-									break;
+								removeOverlapEntry(&xt, oldBufferFlag, newBufferFlag);
 							}
 
 						}
@@ -252,10 +251,15 @@ namespace dashDiff
 			}
 		}
 
+	public:
+
+		differencesReport getReport(void)
+		{
+			return report;
+		}
+
 		void findCommonRanges(int i, int athread, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
 		{
-			std::cout << "Finding ranges for " << i << std::endl;
-
 			std::vector<dualRange> localRangeVector;
 
 			for (int j = 0; j < oldFileBufferArray[i].pointerBuffer.size(); j++)
@@ -303,8 +307,8 @@ namespace dashDiff
 						range++;
 					}
 
-					// Check the range to see if this overlaps with anything already in there.
 					dualRange tempRange;
+					bool itSafe = true;
 
 					tempRange.oldRange.start = oleft++;
 					tempRange.oldRange.end = oright;
@@ -317,7 +321,17 @@ namespace dashDiff
 					tempRange.newRange.max = newFileBufferArray[i].pointerBuffer[x].max;
 					tempRange.newRange.reference = newFileBufferArray[i].pointerBuffer[x].reference;
 
-					if (range > 4) // Set to a 5 minimum because the code for S[text] is 4 bytes long as a minimum.
+					for (int rangeTest = 0; rangeTest < localRangeVector.size(); rangeTest++)
+					{
+						if (valuesOverlap(tempRange.oldRange, localRangeVector[rangeTest].oldRange) ||
+							valuesOverlap(tempRange.newRange, localRangeVector[rangeTest].newRange))
+						{
+							itSafe = false;
+							break;
+						}
+					}
+
+					if (range > 4 && itSafe) // Set to a 5 minimum because the code for S[text] is 4 bytes long as a minimum.
 					{				// So while we can skip that text, it really doesm't save us anything and just increases
 									// the size of the patch file, and computation time.
 						dualRange response;
@@ -351,18 +365,15 @@ namespace dashDiff
 			if (localRangeVector.size() > 0)
 			{
 				rangeVectorMutex.lock();
-				std::cout << "Locked" << std::endl;
-		
+
 				rangeVector.insert(rangeVector.end(), localRangeVector.begin(), localRangeVector.end());
 
 				removeWeakOverlaps(oldBufferFlag, newBufferFlag);
 				reduceOverlaps(oldBufferFlag, newBufferFlag);
 
-				std::cout << "Unlocked" << std::endl;
 				rangeVectorMutex.unlock();
 			}
 
-			std::cout << "Finished finding ranges for " << i << std::endl;
 			threadActive[athread] = false; // Feels wrong, but here we are.
 		}
 
@@ -370,6 +381,10 @@ namespace dashDiff
 		{
 			uint8_t* oldBufferFlag = nullptr;
 			uint8_t* newBufferFlag = nullptr;
+			int threadId[THREADCOUNT];
+			const std::chrono::time_point<std::chrono::system_clock> startOperations = std::chrono::system_clock::now();
+
+			memset(threadId, 0, sizeof(threadId));
 
 			// Optimization: If a range has already been added, and our character falls INSIDE that range, then there is no way we can expand upon it.
 			//			     So it won't be bigger, only the same size, and therefore there is no reason to even look. Must be true on both the old and new side.
@@ -433,22 +448,48 @@ namespace dashDiff
 							nullExists = true;
 					}
 
-					std::this_thread::sleep_for(std::chrono::milliseconds(500));
+					for (int x = 0; x < THREADCOUNT; x++)
+					{
+						if (threadActive[x])
+							std::cout << "[" << threadId[x] << "]";
+						else
+							std::cout << "[_._]";
+					}
+
+					{
+						const std::chrono::time_point<std::chrono::system_clock> currentOperations = std::chrono::system_clock::now();
+						std::cout << "  Elapsed Time: " << std::chrono::duration_cast<std::chrono::seconds>(currentOperations - startOperations).count();
+
+
+						rangeVectorMutex.lock();
+						int entriespersecond = 0;
+
+						if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count() > 0)
+							entriespersecond = rangeVector.size() / std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count();
+						rangeVectorMutex.unlock();
+
+						std::cout << " second(s) {" << entriespersecond << " matches per second}        \r";
+					}
+
+					std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
 					if (nullExists)
 						break;
 				}
 				// Check to see if any threads are null, if so, make them work.
 				for (int x = 0; x < THREADCOUNT; x++)
+				{
 					if (workthread[x] == nullptr)
 					{
 						workthread[x] = new std::thread(&dashDiff::findCommonRanges, this, i, x, oldBufferFlag, newBufferFlag);
+						threadId[x] = i;
 						threadActive[x] = true;
 						workthread[x]->detach();
+
 						break;
 					}
+				}
 
-				//findCommonRanges(i, oldBufferFlag, newBufferFlag);
 			}
 
 			// Wait for all threads to finish
@@ -466,65 +507,61 @@ namespace dashDiff
 				if (!activethread)
 					break;
 
-				std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+				for (int x = 0; x < THREADCOUNT; x++)
+				{
+					if (threadActive[x])
+						std::cout << "[" << threadId[x] << "]";
+					else
+						std::cout << "[_._]";
+				}
+
+				{
+					const std::chrono::time_point<std::chrono::system_clock> currentOperations = std::chrono::system_clock::now();
+					std::cout << "  Elapsed Time: " << std::chrono::duration_cast<std::chrono::seconds>(currentOperations - startOperations).count();
+
+
+					rangeVectorMutex.lock();
+					int entriespersecond = 0;
+
+					if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count() > 0)
+						entriespersecond = rangeVector.size() / std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count();
+					rangeVectorMutex.unlock();
+
+					std::cout << " second(s) {" << entriespersecond << " matches per second}        \r";
+				}
+
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			}
 
 			//if (oldBufferFlag != nullptr)
 				//free(oldBufferFlag);
 			//if (newBufferFlag != nullptr)
 				//free(newBufferFlag);
-		}
 
-		void removeWeakOverlaps(uint8_t *argOldBuff, uint8_t *argNewBuff)
-		{
-			// All the ranges need to be in the same order per side, as all we can do now to differentiate the files is delete from the old
-			// or insert into the new. The number of bytes is immaterial, but out of order ranges are fools dreams. The decision is easy, however.
-			// The bigger range wins.
 
-			for (int i = 0; i < rangeVector.size(); i++)
+			for (int x = 0; x < THREADCOUNT; x++)
 			{
-				for (int j = i; j < rangeVector.size(); j++)
-				{
-					if (i == j)
-						continue;
-
-					if ((rangeVector[i].oldRange.start > rangeVector[j].oldRange.start &&
-							rangeVector[i].newRange.start < rangeVector[j].newRange.start) ||
-						(rangeVector[i].oldRange.start < rangeVector[j].oldRange.start &&
-							rangeVector[i].newRange.start > rangeVector[j].newRange.start))
-					{
-						// Delete the smaller of the two as they are out of order.
-						if (rangeVector[i].rangeSize >= rangeVector[j].rangeSize)
-						{
-							for (int flagit = 0; flagit < rangeVector[j].oldRange.sizeofRange(); flagit++)
-							{
-								bufferFlagMutex.lock();
-								argOldBuff[rangeVector[j].oldRange.start - &oldFileBuffer[0] + flagit]--;
-								argNewBuff[rangeVector[j].newRange.start - &newFileBuffer[0] + flagit]--;
-								bufferFlagMutex.unlock();
-							}
-
-							rangeVector.erase(rangeVector.begin() + j);
-							j--;
-						}
-						else
-						{
-							for (int flagit = 0; flagit < rangeVector[i].oldRange.sizeofRange(); flagit++)
-							{
-								bufferFlagMutex.lock();
-								argOldBuff[rangeVector[i].oldRange.start - &oldFileBuffer[0] + flagit]--;
-								argNewBuff[rangeVector[i].newRange.start - &newFileBuffer[0] + flagit]--;
-								bufferFlagMutex.unlock();	
-							}
-
-							rangeVector.erase(rangeVector.begin() + i);
-							i--;
-							break;
-						}
-						
-					}
-				}
+				if (threadActive[x])
+					std::cout << "[" << threadId[x] << "]";
+				else
+					std::cout << "[_._]";
 			}
+
+			{
+				const std::chrono::time_point<std::chrono::system_clock> currentOperations = std::chrono::system_clock::now();
+				std::cout << "  Elapsed Time: " << std::chrono::duration_cast<std::chrono::seconds>(currentOperations - startOperations).count();
+
+
+				rangeVectorMutex.lock();
+				int entriespersecond = 0;
+
+				if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count() > 0)
+					entriespersecond = rangeVector.size() / std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count();
+				rangeVectorMutex.unlock();
+
+				std::cout << " second(s) {" << entriespersecond << " matches per second}        \r";
+			}
+
 		}
 
 		void sortRanges(void)
