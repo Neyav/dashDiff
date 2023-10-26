@@ -6,7 +6,7 @@
 #include <mutex>
 #include <string>
 
-#define THREADCOUNT 15
+#define THREADCOUNT 8
 
 namespace dashDiff
 {   
@@ -144,9 +144,119 @@ namespace dashDiff
 			return report;
 		}
 
+		void reduceOverlaps(uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
+		{
+			if (rangeVector.size() > 1)
+			{
+				for (auto xt = rangeVector.begin(); xt != rangeVector.end(); xt++)
+				{
+					for (auto it = rangeVector.begin(); it != rangeVector.end(); it++)
+					{
+						if (xt == it)
+							continue;
+
+						if (valuesOverlap(xt->oldRange, it->oldRange))
+						{
+							// If this range is bigger than the one we're comparing it to, remove the smaller one.
+
+							if (xt->oldRange > it->oldRange)
+							{
+								bufferFlagMutex.lock();
+
+								for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
+								{
+									oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
+									newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
+								}
+
+								bufferFlagMutex.unlock();
+
+								it = rangeVector.erase(it);
+
+								if (it != rangeVector.begin())
+									it--;
+
+								if (rangeVector.empty())
+									break;
+							}
+							else
+							{
+								bufferFlagMutex.lock();
+
+								for (int flagit = 0; flagit < xt->oldRange.sizeofRange(); flagit++)
+								{
+									oldBufferFlag[xt->oldRange.start - &oldFileBuffer[0] + flagit]--;
+									newBufferFlag[xt->newRange.start - &newFileBuffer[0] + flagit]--;
+								}
+
+								bufferFlagMutex.unlock();
+
+								xt = rangeVector.erase(xt);
+
+								if (xt != rangeVector.begin())
+									xt--;
+
+								if (rangeVector.empty())
+									break;
+
+							}
+
+						}
+						else if (valuesOverlap(xt->newRange, it->newRange))
+						{
+							// If this range is bigger than the one we're comparing it to, remove the smaller one.
+
+							if (xt->newRange > it->newRange)
+							{
+								bufferFlagMutex.lock();
+								for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
+								{
+									oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
+									newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
+								}
+								bufferFlagMutex.unlock();
+
+								it = rangeVector.erase(it);
+
+								if (it != rangeVector.begin())
+									it--;
+
+								if (rangeVector.empty())
+									break;
+							}
+							else
+							{
+								bufferFlagMutex.lock();
+
+								for (int flagit = 0; flagit < xt->oldRange.sizeofRange(); flagit++)
+								{
+									oldBufferFlag[xt->oldRange.start - &oldFileBuffer[0] + flagit]--;
+									newBufferFlag[xt->newRange.start - &newFileBuffer[0] + flagit]--;
+								}
+
+								bufferFlagMutex.unlock();
+
+								xt = rangeVector.erase(xt);
+
+								if (xt != rangeVector.begin())
+									xt--;
+
+								if (rangeVector.empty())
+									break;
+							}
+
+						}
+
+					}
+				}
+			}
+		}
+
 		void findCommonRanges(int i, int athread, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
 		{
 			std::cout << "Finding ranges for " << i << std::endl;
+
+			std::vector<dualRange> localRangeVector;
 
 			for (int j = 0; j < oldFileBufferArray[i].pointerBuffer.size(); j++)
 			{
@@ -207,78 +317,6 @@ namespace dashDiff
 					tempRange.newRange.max = newFileBufferArray[i].pointerBuffer[x].max;
 					tempRange.newRange.reference = newFileBufferArray[i].pointerBuffer[x].reference;
 
-					rangeVectorMutex.lock();
-
-					if (rangeVector.size() > 1)
-					{
-						for (auto it = rangeVector.begin(); it != rangeVector.end(); it++)
-						{
-							if (valuesOverlap(tempRange.oldRange, it->oldRange))
-							{
-								// If this range is bigger than the one we're comparing it to, remove the smaller one.
-
-								if (tempRange.oldRange > it->oldRange)
-								{
-									bufferFlagMutex.lock();
-
-									for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
-									{
-										oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
-										newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
-									}
-
-									bufferFlagMutex.unlock();
-
-									it = rangeVector.erase(it);
-
-									if (it != rangeVector.begin())
-										it--;
-
-									if (rangeVector.empty())
-										break;
-								}
-								else
-								{
-									range = 0;
-									break;
-								}
-
-							}
-							else if (valuesOverlap(tempRange.newRange, it->newRange))
-							{
-								// If this range is bigger than the one we're comparing it to, remove the smaller one.
-
-								if (tempRange.newRange > it->newRange)
-								{
-									bufferFlagMutex.lock();
-									for (int flagit = 0; flagit < it->oldRange.sizeofRange(); flagit++)
-									{
-										oldBufferFlag[it->oldRange.start - &oldFileBuffer[0] + flagit]--;
-										newBufferFlag[it->newRange.start - &newFileBuffer[0] + flagit]--;
-									}
-									bufferFlagMutex.unlock();
-
-									it = rangeVector.erase(it);
-
-									if (it != rangeVector.begin())
-										it--;
-
-									if (rangeVector.empty())
-										break;
-								}
-								else
-								{
-									range = 0;
-									break;
-								}
-
-							}
-
-						}
-					}
-
-					rangeVectorMutex.unlock();
-
 					if (range > 4) // Set to a 5 minimum because the code for S[text] is 4 bytes long as a minimum.
 					{				// So while we can skip that text, it really doesm't save us anything and just increases
 									// the size of the patch file, and computation time.
@@ -295,24 +333,8 @@ namespace dashDiff
 						response.newRange.min = newFileBufferArray[i].pointerBuffer[x].min;
 						response.newRange.reference = newFileBufferArray[i].pointerBuffer[x].reference;
 
-						// Display the contents of both rangesdddddddddddddwwwwwwwwwwww
-						/*std::cout << "[";
-						while (oleft != oright)
-						{
-							std::cout << *oleft;
-							oleft++;
-						}
-						std::cout << "]->[";
-						while (nleft != nright)
-						{
-							std::cout << *nleft;
-							nleft++;
-						}
-						std::cout << "]" << std::endl;*/
+						localRangeVector.push_back(response);
 
-						rangeVectorMutex.lock();
-						rangeVector.push_back(response);
-						rangeVectorMutex.unlock();
 						bufferFlagMutex.lock();
 						for (int bfit = 0; bfit < response.rangeSize; bfit++)
 						{
@@ -320,12 +342,24 @@ namespace dashDiff
 							newBufferFlag[response.newRange.start - &newFileBuffer[0] + bfit]++;
 						}
 						bufferFlagMutex.unlock();
-						// Remove out of order ranges here, so they don't clog the pipeline later on.
-						this->removeWeakOverlaps(oldBufferFlag, newBufferFlag);
 
 					}
 
 				}
+			}
+
+			if (localRangeVector.size() > 0)
+			{
+				rangeVectorMutex.lock();
+				std::cout << "Locked" << std::endl;
+		
+				rangeVector.insert(rangeVector.end(), localRangeVector.begin(), localRangeVector.end());
+
+				removeWeakOverlaps(oldBufferFlag, newBufferFlag);
+				reduceOverlaps(oldBufferFlag, newBufferFlag);
+
+				std::cout << "Unlocked" << std::endl;
+				rangeVectorMutex.unlock();
 			}
 
 			std::cout << "Finished finding ranges for " << i << std::endl;
@@ -447,7 +481,6 @@ namespace dashDiff
 			// or insert into the new. The number of bytes is immaterial, but out of order ranges are fools dreams. The decision is easy, however.
 			// The bigger range wins.
 
-			rangeVectorMutex.lock();
 			for (int i = 0; i < rangeVector.size(); i++)
 			{
 				for (int j = i; j < rangeVector.size(); j++)
@@ -492,7 +525,6 @@ namespace dashDiff
 					}
 				}
 			}
-			rangeVectorMutex.unlock();
 		}
 
 		void sortRanges(void)
