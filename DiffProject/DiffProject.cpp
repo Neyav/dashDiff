@@ -121,7 +121,6 @@ namespace dashDiff
 
 		std::vector<dualRange> rangeVector;
 		std::mutex rangeVectorMutex;
-		std::mutex bufferFlagMutex;
 
 		bool threadActive[THREADCOUNT];
 
@@ -160,10 +159,8 @@ namespace dashDiff
 						{
 							for (int flagit = 0; flagit < rangeVector[j].oldRange.sizeofRange(); flagit++)
 							{
-								bufferFlagMutex.lock();
 								argOldBuff[rangeVector[j].oldRange.start - &oldFileBuffer[0] + flagit]--;
 								argNewBuff[rangeVector[j].newRange.start - &newFileBuffer[0] + flagit]--;
-								bufferFlagMutex.unlock();
 							}
 
 							rangeVector.erase(rangeVector.begin() + j);
@@ -173,10 +170,8 @@ namespace dashDiff
 						{
 							for (int flagit = 0; flagit < rangeVector[i].oldRange.sizeofRange(); flagit++)
 							{
-								bufferFlagMutex.lock();
 								argOldBuff[rangeVector[i].oldRange.start - &oldFileBuffer[0] + flagit]--;
 								argNewBuff[rangeVector[i].newRange.start - &newFileBuffer[0] + flagit]--;
-								bufferFlagMutex.unlock();
 							}
 
 							rangeVector.erase(rangeVector.begin() + i);
@@ -191,15 +186,11 @@ namespace dashDiff
 
 		void removeOverlapEntry(int *it, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
 		{
-			bufferFlagMutex.lock();
-
 			for (int flagit = 0; flagit < rangeVector[*it].oldRange.sizeofRange(); flagit++)
 			{
 				oldBufferFlag[rangeVector[*it].oldRange.start - &oldFileBuffer[0] + flagit]--;
 				newBufferFlag[rangeVector[*it].newRange.start - &newFileBuffer[0] + flagit]--;
 			}
-
-			bufferFlagMutex.unlock();
 
 			rangeVector.erase(rangeVector.begin() + *it);
 
@@ -258,9 +249,27 @@ namespace dashDiff
 			return report;
 		}
 
-		void findCommonRanges(int i, int athread, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
+		void findCommonRanges(int i, int athread)
 		{
 			std::vector<dualRange> localRangeVector;
+			uint8_t* oldBufferFlag = nullptr;
+			uint8_t* newBufferFlag = nullptr;
+
+			oldBufferFlag = new uint8_t[oldFileBufferSize];
+			newBufferFlag = new uint8_t[newFileBufferSize];
+
+			// Optimization: If a range has already been added, and our character falls INSIDE that range, then there is no way we can expand upon it.
+			//			     So it won't be bigger, only the same size, and therefore there is no reason to even look. Must be true on both the old and new side.
+
+
+			for (int i = 0; i < oldFileBufferSize; i++)
+			{
+				oldBufferFlag[i] = 0;
+			}
+			for (int i = 0; i < newFileBufferSize; i++)
+			{
+				newBufferFlag[i] = 0;
+			}
 
 			for (int j = 0; j < oldFileBufferArray[i].pointerBuffer.size(); j++)
 			{
@@ -270,16 +279,9 @@ namespace dashDiff
 					char* nleft, * nright;
 					int range = 1;
 
-					// I have every reason to believe that multithreading breaks this, so I'm going to not use it as a criteria for skipping until
-					// it gets refactored to work in a thread safe way.
-					/*bufferFlagMutex.lock();
 					if (oldBufferFlag[oldFileBufferArray[i].pointerBuffer[j].reference - &oldFileBuffer[0]] > 0 &&
 						newBufferFlag[newFileBufferArray[i].pointerBuffer[x].reference - &newFileBuffer[0]] > 0)
-					{
-						bufferFlagMutex.unlock();
 						continue;
-					}
-					bufferFlagMutex.unlock();*/
 
 					oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
 					nleft = nright = newFileBufferArray[i].pointerBuffer[x].reference;
@@ -349,13 +351,11 @@ namespace dashDiff
 
 						localRangeVector.push_back(response);
 
-						bufferFlagMutex.lock();
 						for (int bfit = 0; bfit < response.rangeSize; bfit++)
 						{
 							oldBufferFlag[response.oldRange.start - &oldFileBuffer[0] + bfit]++;
 							newBufferFlag[response.newRange.start - &newFileBuffer[0] + bfit]++;
 						}
-						bufferFlagMutex.unlock();
 
 					}
 
@@ -375,31 +375,17 @@ namespace dashDiff
 			}
 
 			threadActive[athread] = false; // Feels wrong, but here we are.
+
+			delete oldBufferFlag;
+			delete newBufferFlag;
 		}
 
 		void dumpBuffersintoArray(void)
 		{
-			uint8_t* oldBufferFlag = nullptr;
-			uint8_t* newBufferFlag = nullptr;
 			int threadId[THREADCOUNT];
 			const std::chrono::time_point<std::chrono::system_clock> startOperations = std::chrono::system_clock::now();
 
 			memset(threadId, 0, sizeof(threadId));
-
-			// Optimization: If a range has already been added, and our character falls INSIDE that range, then there is no way we can expand upon it.
-			//			     So it won't be bigger, only the same size, and therefore there is no reason to even look. Must be true on both the old and new side.
-
-			oldBufferFlag = new uint8_t[oldFileBufferSize];
-			newBufferFlag = new uint8_t[newFileBufferSize];
-
-			for (int i = 0; i < oldFileBufferSize; i++)
-			{
-				oldBufferFlag[i] = 0;
-			}
-			for (int i = 0; i < newFileBufferSize; i++)
-			{
-				newBufferFlag[i] = 0;
-			}
 
 			// Dump the buffers into the arrays for sorting.
 			for (int i = 0; i < oldFileBufferSize; i++)
@@ -481,7 +467,7 @@ namespace dashDiff
 				{
 					if (workthread[x] == nullptr)
 					{
-						workthread[x] = new std::thread(&dashDiff::findCommonRanges, this, i, x, oldBufferFlag, newBufferFlag);
+						workthread[x] = new std::thread(&dashDiff::findCommonRanges, this, i, x);
 						threadId[x] = i;
 						threadActive[x] = true;
 						workthread[x]->detach();
@@ -532,12 +518,6 @@ namespace dashDiff
 
 				std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			}
-
-			//if (oldBufferFlag != nullptr)
-				//free(oldBufferFlag);
-			//if (newBufferFlag != nullptr)
-				//free(newBufferFlag);
-
 
 			for (int x = 0; x < THREADCOUNT; x++)
 			{
