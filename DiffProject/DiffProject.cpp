@@ -10,7 +10,7 @@
 #define THREADCOUNT 10
 
 namespace dashDiff
-{   
+{
 	// Stores all the information about our character matching for finding similar blocks of text.
 	struct differencesReport
 	{
@@ -24,12 +24,12 @@ namespace dashDiff
 	class characterRange
 	{
 	public:
-		char *start;
-		char *reference;
-		char *end;
+		char* start;
+		char* reference;
+		char* end;
 
-		char *min;
-		char *max;
+		char* min;
+		char* max;
 
 		size_t sizeofRange(void)
 		{
@@ -77,7 +77,7 @@ namespace dashDiff
 		// We're allocating a SINGLE char buffer to store the file in, and then we're going to reference it with pointers.
 		std::vector<characterRange> pointerBuffer;
 
-		void add(char *reference, char *start, char *end, char *min, char *max)
+		void add(char* reference, char* start, char* end, char* min, char* max)
 		{
 			characterRange aChar;
 			aChar.reference = reference;
@@ -85,7 +85,7 @@ namespace dashDiff
 			aChar.end = end;
 			aChar.min = min;
 			aChar.max = max;
-			
+
 			pointerBuffer.push_back(aChar);
 		}
 
@@ -106,14 +106,14 @@ namespace dashDiff
 	};
 
 	class dashDiff
-	{	
+	{
 	private:
 		// File stream handles for comparison.
 		std::fstream oldFile;
 		std::fstream newFile;
 
-		char * oldFileBuffer;
-		char *newFileBuffer;
+		char* oldFileBuffer;
+		char* newFileBuffer;
 		size_t oldFileBufferSize;
 		size_t newFileBufferSize;
 
@@ -191,7 +191,7 @@ namespace dashDiff
 			}
 		}
 
-		void removeOverlapEntry(int *it, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
+		void removeOverlapEntry(int* it, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
 		{
 			for (int flagit = 0; flagit < rangeVector[*it].oldRange.sizeofRange(); flagit++)
 			{
@@ -377,6 +377,33 @@ namespace dashDiff
 			threadActive[athread] = false; // Feels wrong, but here we are.
 		}
 
+		void progressToConsole(std::chrono::time_point<std::chrono::system_clock> startOperations)
+		{
+			for (int x = 0; x < THREADCOUNT; x++)
+			{
+				if (threadActive[x])
+					std::cout << "[" << std::setw(3) << threadPercent[x] << "%]";
+				else
+					std::cout << "[___%]";
+			}
+
+			{
+				const std::chrono::time_point<std::chrono::system_clock> currentOperations = std::chrono::system_clock::now();
+				std::cout << "  Elapsed Time: " << std::chrono::duration_cast<std::chrono::seconds>(currentOperations - startOperations).count();
+
+
+				rangeVectorMutex.lock();
+				int entriespersecond = 0;
+
+				if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count() > 0)
+					entriespersecond = rangeVector.size() / std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count();
+				rangeVectorMutex.unlock();
+
+				std::cout << " second(s) {" << entriespersecond << " matches per second}        \r";
+
+			}
+		}
+
 		void dumpBuffersintoArray(void)
 		{
 			int threadId[THREADCOUNT];
@@ -405,12 +432,12 @@ namespace dashDiff
 			// Dump the buffers into the arrays for sorting.
 			for (int i = 0; i < oldFileBufferSize; i++)
 			{	// 128 + because char's are unsigned by default. I only missed this because I was using plaintext before.
-				oldFileBufferArray[128+oldFileBuffer[i]].add(&oldFileBuffer[i], &oldFileBuffer[i], &oldFileBuffer[i], &oldFileBuffer[0], &oldFileBuffer[oldFileBufferSize - 1]);
+				oldFileBufferArray[128 + oldFileBuffer[i]].add(&oldFileBuffer[i], &oldFileBuffer[i], &oldFileBuffer[i], &oldFileBuffer[0], &oldFileBuffer[oldFileBufferSize - 1]);
 			}
 
 			for (int i = 0; i < newFileBufferSize; i++)
 			{
-				newFileBufferArray[128+newFileBuffer[i]].add(&newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[0], &newFileBuffer[newFileBufferSize - 1]);
+				newFileBufferArray[128 + newFileBuffer[i]].add(&newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[i], &newFileBuffer[0], &newFileBuffer[newFileBufferSize - 1]);
 			}
 
 			std::thread* workthread[THREADCOUNT];
@@ -449,28 +476,7 @@ namespace dashDiff
 							nullExists = true;
 					}
 
-					for (int x = 0; x < THREADCOUNT; x++)
-					{
-						if (threadActive[x])
-							std::cout << "[" << std::setw(3) << threadPercent[x] << "%]";
-						else
-							std::cout << "[___%]";
-					}
-
-					{
-						const std::chrono::time_point<std::chrono::system_clock> currentOperations = std::chrono::system_clock::now();
-						std::cout << "  Elapsed Time: " << std::chrono::duration_cast<std::chrono::seconds>(currentOperations - startOperations).count();
-
-
-						rangeVectorMutex.lock();
-						int entriespersecond = 0;
-
-						if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count() > 0)
-							entriespersecond = rangeVector.size() / std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count();
-						rangeVectorMutex.unlock();
-
-						std::cout << " second(s) {" << entriespersecond << " matches per second}        \r";
-					}
+					progressToConsole(startOperations);
 
 					std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -508,237 +514,194 @@ namespace dashDiff
 				if (!activethread)
 					break;
 
-				for (int x = 0; x < THREADCOUNT; x++)
-				{
-					if (threadActive[x])
-						std::cout << "[" << std::setw(3) << threadPercent[x] << "%]";
-					else
-						std::cout << "[___%]";
-				}
-
-				{
-					const std::chrono::time_point<std::chrono::system_clock> currentOperations = std::chrono::system_clock::now();
-					std::cout << "  Elapsed Time: " << std::chrono::duration_cast<std::chrono::seconds>(currentOperations - startOperations).count();
-
-
-					rangeVectorMutex.lock();
-					int entriespersecond = 0;
-
-					if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count() > 0)
-						entriespersecond = rangeVector.size() / std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count();
-					rangeVectorMutex.unlock();
-
-					std::cout << " second(s) {" << entriespersecond << " matches per second}        \r";
-				}
+				progressToConsole(startOperations);
 
 				std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			}
 
-			for (int x = 0; x < THREADCOUNT; x++)
-			{
-				if (threadActive[x])
-					std::cout << "[" << std::setw(3) << threadPercent[x] << "%]";
-				else
-					std::cout << "[___%]";
-			}
+		progressToConsole(startOperations);
 
-			{
-				const std::chrono::time_point<std::chrono::system_clock> currentOperations = std::chrono::system_clock::now();
-				std::cout << "  Elapsed Time: " << std::chrono::duration_cast<std::chrono::seconds>(currentOperations - startOperations).count();
+		delete oldBufferFlag;
+		delete newBufferFlag;
 
+	}
 
-				rangeVectorMutex.lock();
-				int entriespersecond = 0;
+	void sortRanges(void)
+	{
+		// Sort the ranges by the start of the old range.
+		std::sort(rangeVector.begin(), rangeVector.end());
+	}
 
-				if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count() > 0)
-					entriespersecond = rangeVector.size() / std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count();
-				rangeVectorMutex.unlock();
-
-				std::cout << " second(s) {" << entriespersecond << " matches per second}        \r";
-			}
-
-			delete oldBufferFlag;
-			delete newBufferFlag;
-
+	void readIntoBuffers(void)
+	{
+		// Check if the files are open.
+		if (!oldFile.is_open() || !newFile.is_open())
+		{
+			std::cout << "dashDiff::dashDiff.readIntoBuffers(): Files are not open for reading." << std::endl;
+			exit(-1);
 		}
 
-		void sortRanges(void)
+		// Get the size of the files.
+		oldFile.seekg(0, std::ios::end);
+		oldFileBufferSize = oldFile.tellg();
+		oldFile.seekg(0, std::ios::beg);
+
+		newFile.seekg(0, std::ios::end);
+		newFileBufferSize = newFile.tellg();
+		newFile.seekg(0, std::ios::beg);
+
+		// Allocate the buffers.
+		oldFileBuffer = new char[oldFileBufferSize];
+		newFileBuffer = new char[newFileBufferSize];
+
+		// Read the files into the buffers.
+		oldFile.read(oldFileBuffer, oldFileBufferSize);
+		newFile.read(newFileBuffer, newFileBufferSize);
+
+		// Captain, Captain, ready to rip.
+	}
+
+	bool openForComparison(const char* oldFilePath, const char* newFilePath)
+	{
+		report = { 0, 0, 0, 0, 0 };
+
+		// open both files as binary input streams.
+		oldFile.open(oldFilePath, std::ios::in | std::ios::binary);
+		newFile.open(newFilePath, std::ios::in | std::ios::binary);
+
+		// If either file failed to open, return false.
+		if (!oldFile.is_open() || !newFile.is_open())
 		{
-			// Sort the ranges by the start of the old range.
-			std::sort(rangeVector.begin(), rangeVector.end());
+			return false;
 		}
 
-		void readIntoBuffers(void)
+		return true;
+	}
+
+	void writeToPatchFile(std::fstream* afileStream)
+	{
+		char* oldFilePointer = oldFileBuffer;
+		char* newFilePointer = newFileBuffer;
+
+		report.oldFileSize = oldFileBufferSize;
+		report.newFileSize = newFileBufferSize;
+
+		for (int i = 0; i < rangeVector.size(); i++)
 		{
-			// Check if the files are open.
-			if (!oldFile.is_open() || !newFile.is_open())
+			// Delete everything in the old file before the range.
+			if (oldFilePointer != rangeVector[i].oldRange.start)
 			{
-				std::cout << "dashDiff::dashDiff.readIntoBuffers(): Files are not open for reading." << std::endl;
-				exit(-1);
+				*afileStream << "-[" << rangeVector[i].oldRange.start - oldFilePointer << "]";
+				report.deletedCharacters += rangeVector[i].oldRange.start - oldFilePointer;
+				oldFilePointer = rangeVector[i].oldRange.start;
 			}
-
-			// Get the size of the files.
-			oldFile.seekg(0, std::ios::end);
-			oldFileBufferSize = oldFile.tellg();
-			oldFile.seekg(0, std::ios::beg);
-
-			newFile.seekg(0, std::ios::end);
-			newFileBufferSize = newFile.tellg();
-			newFile.seekg(0, std::ios::beg);
-
-			// Allocate the buffers.
-			oldFileBuffer = new char[oldFileBufferSize];
-			newFileBuffer = new char[newFileBufferSize];
-
-			// Read the files into the buffers.
-			oldFile.read(oldFileBuffer, oldFileBufferSize);
-			newFile.read(newFileBuffer, newFileBufferSize);
-
-			// Captain, Captain, ready to rip.
-		}
-
-		bool openForComparison(const char* oldFilePath, const char* newFilePath)
-		{
-			report = { 0, 0, 0, 0, 0 };
-
-			// open both files as binary input streams.
-			oldFile.open(oldFilePath, std::ios::in | std::ios::binary);
-			newFile.open(newFilePath, std::ios::in | std::ios::binary);
-
-			// If either file failed to open, return false.
-			if (!oldFile.is_open() || !newFile.is_open())
+			// Add everything in the new file before the range.
+			if (newFilePointer != rangeVector[i].newRange.start)
 			{
-				return false;
-			}
-
-			return true;
-		}
-
-		void writeToPatchFile(std::fstream *afileStream)
-		{
-			char *oldFilePointer = oldFileBuffer;
-			char *newFilePointer = newFileBuffer;
-
-			report.oldFileSize = oldFileBufferSize;
-			report.newFileSize = newFileBufferSize;
-
-			for (int i = 0; i < rangeVector.size(); i++)
-			{
-				// Delete everything in the old file before the range.
-				if (oldFilePointer != rangeVector[i].oldRange.start)
-				{
-					*afileStream << "-[" << rangeVector[i].oldRange.start - oldFilePointer << "]";
-					report.deletedCharacters += rangeVector[i].oldRange.start - oldFilePointer;
-					oldFilePointer = rangeVector[i].oldRange.start;
-				}
-				// Add everything in the new file before the range.
-				if (newFilePointer != rangeVector[i].newRange.start)
-				{
-					*afileStream << "+[" << rangeVector[i].newRange.start - newFilePointer << "]";
-					while (newFilePointer < rangeVector[i].newRange.start)
-					{
-						*afileStream << *newFilePointer;
-						newFilePointer++;
-						report.insertedCharacters++;
-					};
-				}
-				// Skip the range
-				*afileStream << "S[" << rangeVector[i].oldRange.end - rangeVector[i].oldRange.start << "]";
-				oldFilePointer = rangeVector[i].oldRange.end;
-				newFilePointer = rangeVector[i].newRange.end;
-				report.sameCharacters += rangeVector[i].oldRange.end - rangeVector[i].oldRange.start;
-			}
-			// Print the rest of the old file.
-			if (oldFilePointer != &oldFileBuffer[oldFileBufferSize])
-			{
-				*afileStream << "-[" << &oldFileBuffer[oldFileBufferSize] - oldFilePointer << "]";
-				report.deletedCharacters += &oldFileBuffer[oldFileBufferSize] - oldFilePointer;
-			}
-			// Print the rest of the new file.
-			if (newFilePointer != &newFileBuffer[newFileBufferSize])
-			{
-				*afileStream << "+[" << &newFileBuffer[newFileBufferSize] - newFilePointer << "]";
-				while (newFilePointer != &newFileBuffer[newFileBufferSize])
+				*afileStream << "+[" << rangeVector[i].newRange.start - newFilePointer << "]";
+				while (newFilePointer < rangeVector[i].newRange.start)
 				{
 					*afileStream << *newFilePointer;
 					newFilePointer++;
 					report.insertedCharacters++;
-				}
+				};
+			}
+			// Skip the range
+			*afileStream << "S[" << rangeVector[i].oldRange.end - rangeVector[i].oldRange.start << "]";
+			oldFilePointer = rangeVector[i].oldRange.end;
+			newFilePointer = rangeVector[i].newRange.end;
+			report.sameCharacters += rangeVector[i].oldRange.end - rangeVector[i].oldRange.start;
+		}
+		// Print the rest of the old file.
+		if (oldFilePointer != &oldFileBuffer[oldFileBufferSize])
+		{
+			*afileStream << "-[" << &oldFileBuffer[oldFileBufferSize] - oldFilePointer << "]";
+			report.deletedCharacters += &oldFileBuffer[oldFileBufferSize] - oldFilePointer;
+		}
+		// Print the rest of the new file.
+		if (newFilePointer != &newFileBuffer[newFileBufferSize])
+		{
+			*afileStream << "+[" << &newFileBuffer[newFileBufferSize] - newFilePointer << "]";
+			while (newFilePointer != &newFileBuffer[newFileBufferSize])
+			{
+				*afileStream << *newFilePointer;
+				newFilePointer++;
+				report.insertedCharacters++;
 			}
 		}
+	}
 
-		void displayDifferences(void)
+	void displayDifferences(void)
+	{
+		char* oldFilePointer = oldFileBuffer;
+		char* newFilePointer = newFileBuffer;
+
+		for (int i = 0; i < rangeVector.size(); i++)
 		{
-			char *oldFilePointer = oldFileBuffer;
-			char *newFilePointer = newFileBuffer;
-
-			for (int i = 0; i < rangeVector.size(); i++)
+			std::cout << "Range :" << i << "[";
+			oldFilePointer = rangeVector[i].oldRange.start;
+			while (oldFilePointer != rangeVector[i].oldRange.end)
 			{
-				std::cout << "Range :" << i << "[";
-				oldFilePointer = rangeVector[i].oldRange.start;
-				while (oldFilePointer != rangeVector[i].oldRange.end)
-				{
-					std::cout << *oldFilePointer;
-					oldFilePointer++;
-				}
-				std::cout << "][";
-				newFilePointer = rangeVector[i].newRange.start;
-				while (newFilePointer != rangeVector[i].newRange.end)
-				{
-					std::cout << *newFilePointer;
-					newFilePointer++;
-				}
-				std::cout << "]" << std::endl;
+				std::cout << *oldFilePointer;
+				oldFilePointer++;
 			}
-
-			oldFilePointer = oldFileBuffer;
-			newFilePointer = newFileBuffer;
-
-			// Iterate through the old file's vector
-			for (int i = 0; i < rangeVector.size(); i++)
-			{
-				// Delete everything in the old file before the range.
-				if (oldFilePointer != rangeVector[i].oldRange.start)
-				{
-					std::cout << "-[" << rangeVector[i].oldRange.start - oldFilePointer << "]";
-					oldFilePointer = rangeVector[i].oldRange.start;
-				}
-				// Add everything in the new file before the range.
-				if (newFilePointer != rangeVector[i].newRange.start)
-				{
-					std::cout << "+[";
-					do 
-					{
-						std::cout << *newFilePointer;
-						newFilePointer++;
-					} while (newFilePointer < rangeVector[i].newRange.start);
-					std::cout << "]";
-				}
-				// Print the range.
-				std::cout << "S[" << rangeVector[i].oldRange.end - rangeVector[i].oldRange.start << "]";
-				do 
-				{
-					//std::cout << *oldFilePointer;
-					oldFilePointer++;
-					newFilePointer++;
-				} while (oldFilePointer < rangeVector[i].oldRange.end);
-			}
-			// Print the rest of the old file.
-			if (oldFilePointer != &oldFileBuffer[oldFileBufferSize])
-			{
-				std::cout << "-[" << &oldFileBuffer[oldFileBufferSize] - oldFilePointer << "]";
-			}
-			// Print the rest of the new file.
-			std::cout << "+[";
-			while (newFilePointer != &newFileBuffer[newFileBufferSize])
+			std::cout << "][";
+			newFilePointer = rangeVector[i].newRange.start;
+			while (newFilePointer != rangeVector[i].newRange.end)
 			{
 				std::cout << *newFilePointer;
 				newFilePointer++;
 			}
-			std::cout << "]";
-
+			std::cout << "]" << std::endl;
 		}
 
+		oldFilePointer = oldFileBuffer;
+		newFilePointer = newFileBuffer;
+
+		// Iterate through the old file's vector
+		for (int i = 0; i < rangeVector.size(); i++)
+		{
+			// Delete everything in the old file before the range.
+			if (oldFilePointer != rangeVector[i].oldRange.start)
+			{
+				std::cout << "-[" << rangeVector[i].oldRange.start - oldFilePointer << "]";
+				oldFilePointer = rangeVector[i].oldRange.start;
+			}
+			// Add everything in the new file before the range.
+			if (newFilePointer != rangeVector[i].newRange.start)
+			{
+				std::cout << "+[";
+				do
+				{
+					std::cout << *newFilePointer;
+					newFilePointer++;
+				} while (newFilePointer < rangeVector[i].newRange.start);
+				std::cout << "]";
+			}
+			// Print the range.
+			std::cout << "S[" << rangeVector[i].oldRange.end - rangeVector[i].oldRange.start << "]";
+			do
+			{
+				//std::cout << *oldFilePointer;
+				oldFilePointer++;
+				newFilePointer++;
+			} while (oldFilePointer < rangeVector[i].oldRange.end);
+		}
+		// Print the rest of the old file.
+		if (oldFilePointer != &oldFileBuffer[oldFileBufferSize])
+		{
+			std::cout << "-[" << &oldFileBuffer[oldFileBufferSize] - oldFilePointer << "]";
+		}
+		// Print the rest of the new file.
+		std::cout << "+[";
+		while (newFilePointer != &newFileBuffer[newFileBufferSize])
+		{
+			std::cout << *newFilePointer;
+			newFilePointer++;
+		}
+		std::cout << "]";
+
+	}
 		dashDiff()
 		{
 			oldFileBuffer = nullptr;
