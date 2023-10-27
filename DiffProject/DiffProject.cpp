@@ -105,6 +105,27 @@ namespace dashDiff
 		}
 	};
 
+	class threadRequest
+	{
+	private:
+		inline static 	std::mutex threadRequestMutex;
+	public:
+		int threadId;
+
+		threadRequest()
+		{
+			threadId = -1;
+
+			// Making sure that for the lifetime of this object, no other thread can request a thread.
+			threadRequestMutex.lock();
+		}
+
+		~threadRequest()
+		{
+			threadRequestMutex.unlock();
+		}
+	};
+
 	class dashDiff
 	{
 	private:
@@ -129,6 +150,39 @@ namespace dashDiff
 
 		differencesReport report;
 
+		// Handles obtaining free threads and locking them until the request is fulfilled and deleted.
+		threadRequest *threadDistributer(void)
+		{
+			threadRequest* response = new threadRequest();
+
+			for (int i = 0; i < THREADCOUNT; i++)
+			{
+				if (!threadActive[i])
+				{
+					threadActive[i] = true;
+					response->threadId = i;
+					break;
+				}
+			}
+
+			if (response->threadId == -1)
+			{
+				delete response;
+				return nullptr;
+			}
+			return response;
+		}
+
+		bool threadsActive(void)
+		{
+			for (int i = 0; i < THREADCOUNT; i++)
+			{
+				if (threadActive[i])
+					return true;
+			}
+			return false;
+		}
+
 		bool valuesOverlap(characterRange& a, characterRange& b)
 		{
 			// if the space required to fit both ranges is less than the sum of the two ranges, they overlap.
@@ -139,7 +193,7 @@ namespace dashDiff
 			return false;
 		}
 
-		void removeWeakOverlaps(uint8_t* argOldBuff, uint8_t* argNewBuff)
+		void removeWeakOverlaps(void)
 		{
 			// All the ranges need to be in the same order per side, as all we can do now to differentiate the files is delete from the old
 			// or insert into the new. The number of bytes is immaterial, but out of order ranges are fools dreams. The decision is easy, however.
@@ -160,27 +214,11 @@ namespace dashDiff
 						// Delete the smaller of the two as they are out of order.
 						if (rangeVector[i].rangeSize >= rangeVector[j].rangeSize)
 						{
-							for (int flagit = 0; flagit < rangeVector[j].oldRange.sizeofRange(); flagit++)
-							{
-								bufferMutex.lock();
-								argOldBuff[rangeVector[j].oldRange.start - &oldFileBuffer[0] + flagit]--;
-								argNewBuff[rangeVector[j].newRange.start - &newFileBuffer[0] + flagit]--;
-								bufferMutex.unlock();
-							}
-
 							rangeVector.erase(rangeVector.begin() + j);
 							j--;
 						}
 						else
 						{
-							for (int flagit = 0; flagit < rangeVector[i].oldRange.sizeofRange(); flagit++)
-							{
-								bufferMutex.lock();
-								argOldBuff[rangeVector[i].oldRange.start - &oldFileBuffer[0] + flagit]--;
-								argNewBuff[rangeVector[i].newRange.start - &newFileBuffer[0] + flagit]--;
-								bufferMutex.unlock();
-							}
-
 							rangeVector.erase(rangeVector.begin() + i);
 							i--;
 							break;
@@ -191,22 +229,14 @@ namespace dashDiff
 			}
 		}
 
-		void removeOverlapEntry(int* it, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
+		void removeOverlapEntry(int* it)
 		{
-			for (int flagit = 0; flagit < rangeVector[*it].oldRange.sizeofRange(); flagit++)
-			{
-				bufferMutex.lock();
-				oldBufferFlag[rangeVector[*it].oldRange.start - &oldFileBuffer[0] + flagit]--;
-				newBufferFlag[rangeVector[*it].newRange.start - &newFileBuffer[0] + flagit]--;
-				bufferMutex.unlock();
-			}
-
 			rangeVector.erase(rangeVector.begin() + *it);
 
 			*it--;
 		}
 
-		void reduceOverlaps(uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
+		void reduceOverlaps(void)
 		{
 			if (rangeVector.size() > 1)
 			{
@@ -223,11 +253,11 @@ namespace dashDiff
 
 							if (rangeVector[xt].oldRange > rangeVector[it].oldRange)
 							{
-								removeOverlapEntry(&it, oldBufferFlag, newBufferFlag);
+								removeOverlapEntry(&it);
 							}
 							else
 							{
-								removeOverlapEntry(&xt, oldBufferFlag, newBufferFlag);
+								removeOverlapEntry(&xt);
 							}
 
 						}
@@ -237,11 +267,11 @@ namespace dashDiff
 
 							if (rangeVector[xt].newRange > rangeVector[it].newRange)
 							{
-								removeOverlapEntry(&it, oldBufferFlag, newBufferFlag);
+								removeOverlapEntry(&it);
 							}
 							else
 							{
-								removeOverlapEntry(&xt, oldBufferFlag, newBufferFlag);
+								removeOverlapEntry(&xt);
 							}
 
 						}
@@ -258,7 +288,7 @@ namespace dashDiff
 			return report;
 		}
 
-		void findCommonRanges(int i, int athread, uint8_t* oldBufferFlag, uint8_t* newBufferFlag)
+		void findCommonRanges(int i, int athread)
 		{
 			std::vector<dualRange> localRangeVector;
 
@@ -271,15 +301,6 @@ namespace dashDiff
 					int range = 1;
 
 					threadPercent[athread] = (int)((float)(j * newFileBufferArray[i].pointerBuffer.size() + x) / (float)(oldFileBufferArray[i].pointerBuffer.size() * newFileBufferArray[i].pointerBuffer.size()) * 100);
-
-					/*bufferMutex.lock();
-					if (oldBufferFlag[oldFileBufferArray[i].pointerBuffer[j].reference - &oldFileBuffer[0]] > 0 &&
-						newBufferFlag[newFileBufferArray[i].pointerBuffer[x].reference - &newFileBuffer[0]] > 0)
-					{
-						bufferMutex.unlock();
-						continue;
-					}
-					bufferMutex.unlock();*/
 
 					oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
 					nleft = nright = newFileBufferArray[i].pointerBuffer[x].reference;
@@ -349,14 +370,6 @@ namespace dashDiff
 
 						localRangeVector.push_back(response);
 
-						for (int bfit = 0; bfit < response.rangeSize; bfit++)
-						{
-							bufferMutex.lock();
-							oldBufferFlag[response.oldRange.start - &oldFileBuffer[0] + bfit]++;
-							newBufferFlag[response.newRange.start - &newFileBuffer[0] + bfit]++;
-							bufferMutex.unlock();
-						}
-
 					}
 
 				}
@@ -368,8 +381,8 @@ namespace dashDiff
 
 				rangeVector.insert(rangeVector.end(), localRangeVector.begin(), localRangeVector.end());
 
-				removeWeakOverlaps(oldBufferFlag, newBufferFlag);
-				reduceOverlaps(oldBufferFlag, newBufferFlag);
+				removeWeakOverlaps();
+				reduceOverlaps();
 
 				rangeVectorMutex.unlock();
 			}
@@ -408,24 +421,7 @@ namespace dashDiff
 		{
 			int threadId[THREADCOUNT];
 			const std::chrono::time_point<std::chrono::system_clock> startOperations = std::chrono::system_clock::now();
-			uint8_t* oldBufferFlag = nullptr;
-			uint8_t* newBufferFlag = nullptr;
 
-			oldBufferFlag = new uint8_t[oldFileBufferSize];
-			newBufferFlag = new uint8_t[newFileBufferSize];
-
-			// Optimization: If a range has already been added, and our character falls INSIDE that range, then there is no way we can expand upon it.
-			//			     So it won't be bigger, only the same size, and therefore there is no reason to even look. Must be true on both the old and new side.
-
-
-			for (int i = 0; i < oldFileBufferSize; i++)
-			{
-				oldBufferFlag[i] = 0;
-			}
-			for (int i = 0; i < newFileBufferSize; i++)
-			{
-				newBufferFlag[i] = 0;
-			}
 
 			memset(threadId, 0, sizeof(threadId));
 
@@ -447,12 +443,6 @@ namespace dashDiff
 
 			for (int i = 0; i < 256; i++)
 			{
-				/*char wheelbarrow[] = {'-', '\\', '|', '/'};
-				uint8_t wheelbarrowPlus = 0;
-				uint8_t wheelbarrowNeg = 0;
-				uint8_t oldwheelbarrowPlus = 0;
-				uint8_t oldwheelbarrowNeg = 0;*/
-
 				if (oldFileBufferArray[i].pointerBuffer.size() == 0 || newFileBufferArray[i].pointerBuffer.size() == 0)
 					continue; // Skip this character if it doesn't exist in both files, it can't be valid.
 
@@ -484,17 +474,17 @@ namespace dashDiff
 						break;
 				}
 				// Check to see if any threads are null, if so, make them work.
-				for (int x = 0; x < THREADCOUNT; x++)
-				{
-					if (workthread[x] == nullptr)
-					{
-						workthread[x] = new std::thread(&dashDiff::findCommonRanges, this, i, x, oldBufferFlag, newBufferFlag);
-						threadId[x] = i;
-						threadActive[x] = true;
-						workthread[x]->detach();
 
-						break;
-					}
+				threadRequest *request = threadDistributer();
+
+				if (request != nullptr)
+				{
+					workthread[request->threadId] = new std::thread(&dashDiff::findCommonRanges, this, i, request->threadId);
+					threadId[request->threadId] = i;
+					workthread[request->threadId]->detach();
+
+					delete request;
+					continue;
 				}
 
 			}
@@ -502,16 +492,9 @@ namespace dashDiff
 			// Wait for all threads to finish
 			while (true)
 			{
-				bool activethread = false;
-				for (int i = 0; i < THREADCOUNT; i++)
-				{
-					if (threadActive[i])
-					{
-						activethread = true;
-						break;
-					}
-				}
-				if (!activethread)
+				threadRequest* request = nullptr;
+
+				if (!threadsActive())
 					break;
 
 				progressToConsole(startOperations);
@@ -520,10 +503,6 @@ namespace dashDiff
 			}
 
 		progressToConsole(startOperations);
-
-		delete oldBufferFlag;
-		delete newBufferFlag;
-
 	}
 
 	void sortRanges(void)
