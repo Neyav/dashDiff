@@ -5,6 +5,7 @@
 #include <thread>
 #include <mutex>
 #include <string>
+#include <iomanip>
 
 #define THREADCOUNT 10
 
@@ -124,6 +125,7 @@ namespace dashDiff
 		std::mutex bufferMutex;
 
 		bool threadActive[THREADCOUNT];
+		int threadPercent[THREADCOUNT];
 
 		differencesReport report;
 
@@ -268,14 +270,16 @@ namespace dashDiff
 					char* nleft, * nright;
 					int range = 1;
 
-					bufferMutex.lock();
+					threadPercent[athread] = (int)((float)(j * newFileBufferArray[i].pointerBuffer.size() + x) / (float)(oldFileBufferArray[i].pointerBuffer.size() * newFileBufferArray[i].pointerBuffer.size()) * 100);
+
+					/*bufferMutex.lock();
 					if (oldBufferFlag[oldFileBufferArray[i].pointerBuffer[j].reference - &oldFileBuffer[0]] > 0 &&
 						newBufferFlag[newFileBufferArray[i].pointerBuffer[x].reference - &newFileBuffer[0]] > 0)
 					{
 						bufferMutex.unlock();
 						continue;
 					}
-					bufferMutex.unlock();
+					bufferMutex.unlock();*/
 
 					oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
 					nleft = nright = newFileBufferArray[i].pointerBuffer[x].reference;
@@ -448,9 +452,9 @@ namespace dashDiff
 					for (int x = 0; x < THREADCOUNT; x++)
 					{
 						if (threadActive[x])
-							std::cout << "[" << threadId[x] << "]";
+							std::cout << "[" << std::setw(3) << threadPercent[x] << "%]";
 						else
-							std::cout << "[_._]";
+							std::cout << "[___%]";
 					}
 
 					{
@@ -507,9 +511,9 @@ namespace dashDiff
 				for (int x = 0; x < THREADCOUNT; x++)
 				{
 					if (threadActive[x])
-						std::cout << "[" << threadId[x] << "]";
+						std::cout << "[" << std::setw(3) << threadPercent[x] << "%]";
 					else
-						std::cout << "[_._]";
+						std::cout << "[___%]";
 				}
 
 				{
@@ -533,9 +537,9 @@ namespace dashDiff
 			for (int x = 0; x < THREADCOUNT; x++)
 			{
 				if (threadActive[x])
-					std::cout << "[" << threadId[x] << "]";
+					std::cout << "[" << std::setw(3) << threadPercent[x] << "%]";
 				else
-					std::cout << "[_._]";
+					std::cout << "[___%]";
 			}
 
 			{
@@ -742,7 +746,10 @@ namespace dashDiff
 			oldFileBufferSize = newFileBufferSize = 0;
 
 			for (int i = 0; i < THREADCOUNT; i++)
+			{
 				threadActive[i] = false;
+				threadPercent[i] = 0;
+			}
 		}
 		~dashDiff()
 		{
