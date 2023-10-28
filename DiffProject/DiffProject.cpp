@@ -288,11 +288,11 @@ namespace dashDiff
 			return report;
 		}
 
-		void findCommonRanges(int i, int athread)
+		void findCommonRanges(int i, int athread, int rangeStart, int rangeEnd)
 		{
 			std::vector<dualRange> localRangeVector;
 
-			for (int j = 0; j < oldFileBufferArray[i].pointerBuffer.size(); j++)
+			for (int j = rangeStart; j < rangeEnd; j++)
 			{
 				for (int x = 0; x < newFileBufferArray[i].pointerBuffer.size(); x++)
 				{
@@ -300,7 +300,28 @@ namespace dashDiff
 					char* nleft, * nright;
 					int range = 1;
 
-					threadPercent[athread] = (int)((float)(j * newFileBufferArray[i].pointerBuffer.size() + x) / (float)(oldFileBufferArray[i].pointerBuffer.size() * newFileBufferArray[i].pointerBuffer.size()) * 100);
+					if (threadPercent[athread] == 150)
+					{
+						int orangeEnd = rangeEnd;
+						threadRequest* request = threadDistributer();
+						// We just got the signal to split in half.
+						
+						if (request != nullptr)
+						{	// Only continue if we secured a thread for sure.
+							std::thread *workthread;
+							// Manually adjust our new rangeStart and rangeEnd
+							rangeStart = j;
+							rangeEnd = (rangeEnd - rangeStart) / 2 + rangeStart;
+
+							// break a new thread off that will handle the other half of the range.
+							threadActive[request->threadId] = true;
+							workthread = new std::thread(&dashDiff::findCommonRanges, this, i, request->threadId, rangeEnd, orangeEnd);
+							workthread->detach(); // Memory leak, but minor. Find a way to feed this information backwards to the main thread.
+							delete request;
+						}
+					}
+
+					threadPercent[athread] = (int)((float)((j - rangeStart) * newFileBufferArray[i].pointerBuffer.size() + x) / (float)((rangeEnd - rangeStart) * newFileBufferArray[i].pointerBuffer.size()) * 100);
 
 					oleft = oright = oldFileBufferArray[i].pointerBuffer[j].reference;
 					nleft = nright = newFileBufferArray[i].pointerBuffer[x].reference;
@@ -412,7 +433,7 @@ namespace dashDiff
 					entriespersecond = rangeVector.size() / std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - startOperations).count();
 				rangeVectorMutex.unlock();
 
-				std::cout << " second(s) {" << entriespersecond << " matches per second}        \r";
+				std::cout << " second(s) {" << entriespersecond << " matches per second}\r";
 
 			}
 		}
@@ -468,7 +489,7 @@ namespace dashDiff
 
 					progressToConsole(startOperations);
 
-					std::this_thread::sleep_for(std::chrono::milliseconds(100));
+					std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
 					if (nullExists)
 						break;
@@ -479,7 +500,7 @@ namespace dashDiff
 
 				if (request != nullptr)
 				{
-					workthread[request->threadId] = new std::thread(&dashDiff::findCommonRanges, this, i, request->threadId);
+					workthread[request->threadId] = new std::thread(&dashDiff::findCommonRanges, this, i, request->threadId, 0, oldFileBufferArray[i].pointerBuffer.size());
 					threadId[request->threadId] = i;
 					workthread[request->threadId]->detach();
 
@@ -492,24 +513,43 @@ namespace dashDiff
 			// Wait for all threads to finish
 			while (true)
 			{
-				threadRequest* request = nullptr;
+				int lowestThread = -1;
+				int lowestPercent = 100;
 
 				if (!threadsActive())
 					break;
 
+				// If we still have a thread active, find the lowest one and give it the command to break in two.
+				for (int i = 0; i < THREADCOUNT; i++)
+				{
+					if (threadActive[i])
+					{
+						if (threadPercent[i] < lowestPercent)
+						{
+							lowestPercent = threadPercent[i];
+							lowestThread = i;
+						}
+
+					}
+				}
+
 				progressToConsole(startOperations);
 
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+				if (lowestThread != -1)
+				{
+					threadPercent[lowestThread] = 150; // This is a signal to the thread to break in two.
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
 			}
 
-		progressToConsole(startOperations);
-	}
+			progressToConsole(startOperations);
+		}
 
-	void sortRanges(void)
-	{
-		// Sort the ranges by the start of the old range.
-		std::sort(rangeVector.begin(), rangeVector.end());
-	}
+		void sortRanges(void)
+		{
+			// Sort the ranges by the start of the old range.
+			std::sort(rangeVector.begin(), rangeVector.end());
+		}
 
 	void readIntoBuffers(void)
 	{
@@ -680,7 +720,7 @@ namespace dashDiff
 		}
 		std::cout << "]";
 
-	}
+		};
 		dashDiff()
 		{
 			oldFileBuffer = nullptr;
